@@ -109,7 +109,40 @@ export type TickTickCompletedTaskOptions = {
   readonly projectId?: string;
 };
 
-export type TickTickTaskUpdate = TickTickTaskDraft & {
+/**
+ * Partial-update payload for {@link TasksModule.update}.
+ *
+ * **Only `id` and `projectId` are required.** Every other field is
+ * optional. The implementation distinguishes three caller intents and
+ * maps them to wire behavior:
+ *
+ * | Caller intent | How to express it | Wire effect |
+ * |---|---|---|
+ * | "Leave this field alone" | Omit the key, or pass `undefined` | Field is NOT sent → server preserves current value |
+ * | "Set this field to X" | Pass the value (incl. `0`, `""`, `false`) | Field is sent with the new value |
+ * | "Clear this field" | Pass explicit `null` | Field is sent as `null` → TickTick clears it |
+ *
+ * @remarks
+ * Callers that build update payloads from generic kwargs (MCP servers,
+ * dynamic dispatchers) MUST distinguish "user didn't mention this field"
+ * from "user wants this field cleared" before calling. The most common
+ * pattern is a sentinel for unset:
+ *
+ * ```ts
+ * const UNSET = Symbol('UNSET');
+ * function callerSide(args: { dueDate?: string | null | typeof UNSET }) {
+ *   const payload: Record<string, unknown> = { id, projectId };
+ *   if (args.dueDate !== UNSET) payload.dueDate = args.dueDate; // null OR string
+ *   return tasks.update(payload as TickTickTaskUpdate);
+ * }
+ * ```
+ *
+ * In Python (e.g. an MCP server): default the kwarg to a custom sentinel,
+ * and only forward the field to this library when it's not the sentinel.
+ * Bare `None` defaults will reach this library as `null` and WILL clear
+ * the field — that is intentional given the contract above.
+ */
+export type TickTickTaskUpdate = Partial<TickTickTaskDraft> & {
   readonly id: string;
   readonly projectId: string;
 };

@@ -33,6 +33,16 @@ describe('HabitsModule - CRUD (#15)', () => {
     expect(body.update[0].name).toBe('Exercise daily');
   });
 
+  it('update() should omit undefined fields (preserve server-side values)', async () => {
+    const { client, mockFetch } = createClient([{ status: 200, body: {} }]);
+    await client.habits.update({ id: 'habit123', goal: 5 });
+    const body = JSON.parse(mockFetch.calls[0]![1]?.body as string);
+    expect(body.update[0]).toEqual({ id: 'habit123', goal: 5 });
+    expect(body.update[0]).not.toHaveProperty('name');
+    expect(body.update[0]).not.toHaveProperty('repeatRule');
+    expect(body.update[0]).not.toHaveProperty('color');
+  });
+
   it('delete() should POST delete array with habit id', async () => {
     const { client, mockFetch } = createClient([{ status: 200, body: {} }]);
     await client.habits.delete('habit123');

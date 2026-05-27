@@ -44,6 +44,16 @@ describe('CountdownsModule - CRUD (#25)', () => {
     expect(body.update[0].id).toBe('cd1');
   });
 
+  it('update() should omit undefined fields and preserve date transform', async () => {
+    const { client, mockFetch } = createClient([{ status: 200, body: {} }]);
+    await client.countdowns.update({ id: 'cd1', date: '2027-01-15', remark: 'updated' });
+    const body = JSON.parse(mockFetch.calls[0]![1]?.body as string);
+    expect(body.update[0]).toEqual({ id: 'cd1', date: 20270115, remark: 'updated' });
+    expect(body.update[0]).not.toHaveProperty('name');
+    expect(body.update[0]).not.toHaveProperty('color');
+    expect(body.update[0]).not.toHaveProperty('type');
+  });
+
   it('delete() should POST delete array', async () => {
     const { client, mockFetch } = createClient([{ status: 200, body: {} }]);
     await client.countdowns.delete('cd1');

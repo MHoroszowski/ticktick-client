@@ -1,4 +1,5 @@
 import { generateObjectId } from '../internal/ids.js';
+import { buildPartialUpdateBody } from '../internal/partial-update.js';
 import type { TickTickClient } from '../client.js';
 import type { TickTickCountdown, TickTickCountdownDraft } from '../types.js';
 
@@ -29,9 +30,10 @@ export class CountdownsModule {
 
   async update(params: Partial<TickTickCountdownDraft> & { id: string }): Promise<void> {
     const { date, ...rest } = params;
+    const datePart = date !== undefined ? { date: toDateInt(date) } : {};
     await this.client.request('POST', '/api/v2/countdown/batch', {
       add: [],
-      update: [{ ...rest, ...(date !== undefined && { date: toDateInt(date) }) }],
+      update: [buildPartialUpdateBody({ ...rest, ...datePart })],
       delete: [],
     });
   }
