@@ -229,6 +229,37 @@ export type TickTickColumn = {
   readonly sortOrder?: number;
   readonly createdTime?: string;
   readonly modifiedTime?: string;
+  /** Server-assigned change marker; rotates on every edit. */
+  readonly etag?: string;
+};
+
+/**
+ * Payload for {@link ProjectsModule.createColumn}.
+ *
+ * `projectId` is passed positionally to the method (not in the draft) for
+ * symmetry with {@link TickTickProjectDraft.kind} style. A `sortOrder` of
+ * `0` slots the new column at the front of the list.
+ */
+export type TickTickColumnDraft = {
+  readonly name: string;
+  readonly sortOrder?: number;
+};
+
+/**
+ * Partial-update payload for {@link ProjectsModule.updateColumn}.
+ *
+ * **`projectId` is required on every update** — TickTick's `POST /api/v2/column`
+ * endpoint silently no-ops (returns 200 with empty `id2etag`) if the update
+ * item omits `projectId`. This is a server-side requirement, not a library
+ * choice. Verified empirically 2026-05-27 — see
+ * `Plans/kanban-columns-probe.md` for the wire capture.
+ *
+ * Beyond `id` + `projectId`, the partial-update contract applies: omit a
+ * field to preserve, pass a value to set.
+ */
+export type TickTickColumnUpdate = Partial<TickTickColumnDraft> & {
+  readonly id: string;
+  readonly projectId: string;
 };
 
 /**

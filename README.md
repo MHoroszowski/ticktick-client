@@ -280,6 +280,65 @@ await client.projects.deleteMany([id1, id2]);
 const columns = await client.projects.listColumns(project.id);
 ```
 
+### Kanban Columns
+
+For a project in `viewMode: 'kanban'`, you can create and rename/reorder
+columns (a.k.a. sections / kanban swimlanes).
+
+```typescript
+// Project must be in kanban view for columns to surface in the UI
+const project = await client.projects.create({
+  name: 'Sprint board',
+  viewMode: 'kanban',
+});
+
+// Create a column
+const col = await client.projects.createColumn(project.id, {
+  name: 'To Do',
+  sortOrder: 0,
+});
+
+// Place a task in it
+await client.tasks.create({
+  title: 'Write the docs',
+  projectId: project.id,
+  columnId: col.id,
+});
+
+// Rename and/or reorder
+await client.projects.updateColumn({
+  id: col.id,
+  projectId: project.id,           // REQUIRED — server silently no-ops without it
+  name: 'In Progress',
+  sortOrder: 1,
+});
+
+// Partial update: name only (sortOrder preserved)
+await client.projects.updateColumn({
+  id: col.id,
+  projectId: project.id,
+  name: 'Doing',
+});
+
+// List columns on the project
+const cols = await client.projects.listColumns(project.id);
+```
+
+> **`projectId` is required on every `updateColumn` payload.** TickTick's
+> `POST /api/v2/column` endpoint silently drops the update (returns 200
+> with empty `id2etag`) if the update item omits `projectId`. The
+> TypeScript type enforces this so you cannot accidentally omit it. The
+> requirement was discovered empirically — see
+> `Plans/kanban-columns-probe.md`.
+
+> **There is no `deleteColumn` method.** TickTick's V2 column-delete
+> endpoint is upstream-broken (returns server 500 `unknown_exception`
+> for every payload shape we tried, and soft-delete via `update {deleted: 1}`
+> is silently dropped). See **Known Limitations** below. Workaround:
+> reassign the column's tasks via
+> `tasks.update({ id, projectId, columnId: <other-column-id> })`, or
+> delete and recreate the parent project.
+
 ### Folders (Project Groups)
 
 TickTick supports **one level** of folder nesting — projects can live
@@ -500,6 +559,20 @@ Tested approaches that failed:
 ### Trash Listing Broken ([#33](https://github.com/jaeyeonling/ticktick-client/issues/33))
 
 `listTrash()` calls `GET /api/v2/project/{id}/tasks?status=-1`, but the status filter is **ignored** server-side. Deleted tasks are not retrievable via any known REST endpoint. `restore()` works if you already know the task ID.
+
+### Kanban Column Delete Returns 500
+
+TickTick's V2 column-delete endpoint is **upstream-broken**. After six
+probe iterations on 2026-05-27 against the test account covering REST
+DELETE, batch envelopes, `{deleteIds: [...]}`, soft-delete via
+`update {deleted: 1}`, full-record bodies, kebab paths, and per-id verb
+paths, every shape either returned 404 or a server 500 containing
+`"errorCode":"unknown_exception"`. The closest shape —
+`POST /api/v2/column` with body `{delete: [{id, projectId}]}` — returns
+a malformed `200+500` body hybrid with the same error. The library
+therefore ships no `deleteColumn` method; the third sub-story of fork
+epic #70 (issue #15) stays open pending an upstream fix. Captured wire
+evidence in `Plans/kanban-columns-probe.md`.
 
 ### Focus Analytics Endpoints Return 500 ([#31](https://github.com/jaeyeonling/ticktick-client/issues/31))
 

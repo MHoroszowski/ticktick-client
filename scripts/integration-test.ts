@@ -134,6 +134,99 @@ async function testProjects() {
     if (projectId) await client.projects.delete(projectId).catch(() => null);
     if (projectId2) await client.projects.delete(projectId2).catch(() => null);
   }
+
+  // ───────── Kanban columns (create + update; delete is upstream-broken) ─────────
+  let kanbanProjectId: string | null = null;
+  let kanbanColId: string | null = null;
+  let kanbanTaskId: string | null = null;
+  try {
+    const kp = await client.projects.create({
+      name: `${TEST_PREFIX} kanban ${Date.now()}`,
+      viewMode: 'kanban',
+    });
+    kanbanProjectId = kp.id;
+    ok(`kanban project create() → ${kanbanProjectId}`);
+  } catch (e) {
+    fail('kanban project create()', e);
+  }
+
+  if (kanbanProjectId) {
+    try {
+      const col = await client.projects.createColumn(kanbanProjectId, {
+        name: `${TEST_PREFIX} col`,
+        sortOrder: 0,
+      });
+      kanbanColId = col.id;
+      const cols = await client.projects.listColumns(kanbanProjectId);
+      const found = cols.find((c) => c.id === col.id);
+      if (!found) throw new Error('created column not visible in listColumns');
+      ok(`createColumn() → ${kanbanColId} (visible in listColumns)`);
+    } catch (e) {
+      fail('createColumn()', e);
+    }
+
+    if (kanbanColId) {
+      try {
+        const t = await client.tasks.create({
+          title: `${TEST_PREFIX} task-in-column`,
+          projectId: kanbanProjectId,
+          columnId: kanbanColId,
+        });
+        kanbanTaskId = t.id;
+        ok(`task in column create() → ${kanbanTaskId}`);
+      } catch (e) {
+        fail('task in column create()', e);
+      }
+
+      try {
+        await client.projects.updateColumn({
+          id: kanbanColId,
+          projectId: kanbanProjectId,
+          name: `${TEST_PREFIX} renamed`,
+          sortOrder: 42,
+        });
+        const cols = await client.projects.listColumns(kanbanProjectId);
+        const updated = cols.find((c) => c.id === kanbanColId);
+        if (updated?.name !== `${TEST_PREFIX} renamed`) {
+          throw new Error(`expected rename, got "${updated?.name}"`);
+        }
+        if (updated.sortOrder !== 42) {
+          throw new Error(`expected sortOrder 42, got ${updated.sortOrder}`);
+        }
+        ok('updateColumn() — rename + sortOrder round-trip');
+      } catch (e) {
+        fail('updateColumn()', e);
+      }
+
+      try {
+        const cols = await client.projects.listColumns(kanbanProjectId);
+        const before = cols.find((c) => c.id === kanbanColId);
+        await client.projects.updateColumn({
+          id: kanbanColId,
+          projectId: kanbanProjectId,
+          name: `${TEST_PREFIX} partial-rename`,
+        });
+        const after = (await client.projects.listColumns(kanbanProjectId)).find((c) => c.id === kanbanColId);
+        if (after?.sortOrder !== before?.sortOrder) {
+          throw new Error(`partial update changed sortOrder: ${before?.sortOrder} → ${after?.sortOrder}`);
+        }
+        ok('updateColumn() — partial (name-only) preserves sortOrder');
+      } catch (e) {
+        fail('updateColumn partial', e);
+      }
+    }
+
+    // Cleanup: delete the whole kanban project (cascade removes columns + tasks).
+    // We do NOT exercise deleteColumn because TickTick's V2 column-delete
+    // endpoint is upstream-broken (server 500 unknown_exception). See
+    // Plans/kanban-columns-probe.md and the column-delete tracking issue.
+    try {
+      await client.projects.delete(kanbanProjectId);
+      ok('kanban project cleanup — delete()');
+    } catch (e) {
+      fail('kanban project cleanup', e);
+    }
+  }
 }
 
 // ───────── Tasks ─────────

@@ -1,186 +1,193 @@
 ---
 project: ticktick-client
-task: Implement nested projects (folders / projectGroups)
-slug: nested-projects
+task: Implement Kanban column CRUD (issue #70 — create / update / reorder / delete)
+slug: kanban-columns-crud
 effort: E3
-phase: complete
-progress: 51/51
+phase: verify
+progress: 35/38
 mode: build
-started: 2026-05-27T03:30:00Z
-updated: 2026-05-27T03:40:00Z
+started: 2026-05-27T04:35:00Z
+updated: 2026-05-27T06:25:00Z
+algorithm_config:
+  effort_source: context-override
+  classifier_returned: NATIVE
+  override_reason: slash-command fast-path on /goal escalated for multi-file build with integration probe
+  forge_skipped_show_math: true
 ---
 
 ## Problem
 
-`ticktick-client` exposes the flat-projects surface of TickTick's V2 API (`/api/v2/projects`, `/api/v2/batch/project`) but does not model the **projectGroup** entity that backs folders in the TickTick UI. Callers cannot create folders, move projects into them, or unparent. Every TickTick UI user organises with folders; the library is unusable for any caller that wants to preserve or build that structure.
+`MHoroszowski/ticktick-client` ships `projects.listColumns(projectId)` — read-only access to the kanban-column entity that backs TickTick's "Kanban view." Callers can SEE columns but cannot CREATE, RENAME, REORDER, or DELETE them, which means the library cannot build or maintain a project's kanban structure end-to-end. Issue #70 (epic) opens three child stories — #13 create, #14 update/rename/reorder, #15 delete — to close that gap.
 
-The Open API at developer.ticktick.com does NOT document projectGroups. The shape only exists in the undocumented V2 API the web/mobile clients consume — which is what this library already speaks.
+Two complications discovered at OBSERVE that the issue body under-specifies:
+
+1. **The prior-art citation is over-stated.** Issue #70 cites `hansdoebel/n8n-nodes-ticktick` as wrapping the full Column CRUD. A direct read of that repo (`nodes/TickTick/resources/projects/`) shows it only exposes `viewMode: "kanban"` on `ProjectUpdate` — it does NOT have column create/update/delete operations files. Other OSS clients surveyed (`lazeroffmichael/ticktick-py`, `jen6/ticktick-mcp`, `jacepark12/ticktick-mcp`, `shidhincr/LookUp`) have zero column-mutation code either. **This is genuinely undocumented territory.**
+2. **The endpoint surface is unknown.** The existing `listColumns` hits `GET /api/v2/column?from=0&projectId=…` and returns a `{update: TickTickColumn[]}` wrapper (per the 2026-04-12 fix). The mutation endpoints (`POST /api/v2/batch/column`? per-column `POST /api/v2/column/{id}`?) must be reverse-engineered via a live probe against the test account, mirroring the just-completed `probe-nested-projects.ts` pattern.
 
 ## Vision
 
-A caller writes `client.projectGroups.create({name: "Work"})`, then `client.projects.create({name: "Q3 planning", groupId: <folder-id>})`, and TickTick renders the new project inside the new folder on every device. The surface feels identical to existing `client.projects` / `client.tags` modules — no new auth, no new mental model, just one more typed resource. The euphoric surprise: nesting "just works" with the partial-update contract already shipped — `groupId: null` clears, `groupId: "x"` moves, omitted = preserves.
+A caller writes `client.projects.createColumn(projectId, {name: "In review"})`, gets back a `TickTickColumn` with a server-assigned id and the project's existing columns visible via `listColumns`. They then rename it via `updateColumn({id, name})`, reorder via `updateColumn({id, sortOrder})`, and finally delete it via `deleteColumn(projectId, columnId)` — discovering empirically what happens to tasks left in that column (likely `columnId` returns null on those tasks, but the integration test confirms this and the README documents it).
+
+The euphoric surprise: the four new methods round out the kanban surface with zero architectural novelty — same `client.projects.*` namespace, same partial-update contract, same client-generated 24-hex ObjectId pattern, same `bun test` green. The library moves from "you can read columns" to "you can build columns" in three small endpoints, and the integration test ships a four-step demo (create→place→rename→delete) that doubles as caller documentation.
 
 ## Out of Scope
 
-- Multi-level folder nesting (folders-within-folders). TickTick's data model is one level only; we do not invent a deeper structure.
-- Web-app realtime sync via WebSocket — REST only.
-- Migration helpers for callers moving from flat to nested.
-- A user-facing `client.folders` alias (defer; ship server-name `projectGroups` first).
-- Batch project reorder (`reorder(ids[])`); v1 = per-folder `update({id, sortOrder})`.
-- Any change to OAuth / Open API V1 code paths — the client is V2 cookie-session and stays that way.
-- Any work against Matthew's main TickTick account; test account `doma.spirita@gmail.com` only.
+- **A separate `client.columns` module.** Issue #70 explicitly says touchpoint `src/modules/projects.ts`; extend in place, don't split.
+- **`batch-reorder` of multiple columns in one call.** Per-column `updateColumn({id, sortOrder})` is sufficient for v1; batch reorder is a future story if demand emerges.
+- **Cross-project column moves.** Columns belong to one projectId; moving a column to a different project is not a TickTick UI primitive and isn't worth shipping.
+- **A `client.projects.columns` sub-namespace.** Flat methods on `ProjectsModule` mirror the existing `listColumns` / `listMembers` pattern.
+- **Migration helpers for callers that built their own column workarounds.** They didn't have any — this is genuinely new surface.
+- **Any change to OAuth / Open API V1 paths.** V2 cookie-session only.
+- **Any HTTP call against Matthew's main TickTick account.** Test account `doma.spirita@gmail.com` only.
+- **Version bump / `bun publish`.** Issue #70 is "the code lands on main"; release-cut is a separate workflow.
+- **Refiling the closed-issue history of the just-completed nested-projects work.** The ISA preserves the prior cycle as a Changelog entry; CHANGELOG.md `[0.3.0]` is the durable record.
 
 ## Principles
 
-- **Symmetry over novelty.** New module mirrors `ProjectsModule` line-for-line where the shape allows. No new abstractions.
-- **The partial-update contract carries the nesting semantics.** `groupId` is `string | null | undefined` — same three intents as everywhere else in the library.
-- **Server names, not UI names.** Match TickTick's wire vocabulary (`projectGroup`, `groupId`); avoid drift between docs/code/wire.
-- **Live tests are real probes against the test account, gated by an allowlist guardrail.** Mock unit tests are not sufficient evidence for an undocumented API.
+- **Symmetry over novelty.** New methods mirror the existing `listColumns` shape and the `projects.create/update/delete` patterns. No new helpers, no new abstractions.
+- **The partial-update contract carries everywhere.** `updateColumn` honors `buildPartialUpdateBody`: omit → preserve, value → set, explicit null → clear (where the server allows it).
+- **Server names, not UI names.** TickTick calls these "columns" (`/api/v2/column`); the UI calls them "sections" in some places. Match the server vocabulary; the existing `TickTickColumn` type already does.
+- **Live probe before write.** Mock unit tests are not sufficient evidence for an undocumented V2 endpoint. Capture the wire shape empirically against the test account first, then write the implementation against what was actually observed.
+- **Test-account guardrail by hardcoded constant, not config.** Same rationale as nested-projects (`Decisions` 2026-05-27T03:30Z): config-driven allowlist could silently widen; hardcoded string forces commit-to-change audit trail.
 
 ## Constraints
 
-- Bun + TypeScript only. No npm/npx anywhere in this work.
-- No new dependencies — vitest, the existing fetch, and the existing client base are sufficient.
-- Cookie-session auth path is fixed; new endpoints flow through existing `TickTickClient.request()`.
-- ID-stability: client-generated 24-hex ObjectIDs via `generateObjectId()`, same as projects.
-- Backward compatibility: existing `ProjectsModule` public methods must not change signature. `groupId` is optional and additive only.
-- Test-account guardrail: any live-API code path MUST reject the run if `session.username !== "doma.spirita@gmail.com"`.
+- **Bun + TypeScript only.** No npm/npx anywhere. Existing build (`tsup`), test (`vitest`), and probe (`bun scripts/`) toolchains are sufficient.
+- **No new dependencies.** Existing `client.request()`, `buildPartialUpdateBody`, `generateObjectId` are sufficient.
+- **Backward compatibility.** Existing `listColumns` signature and return shape must not change. The three new methods are additive only.
+- **Touchpoint locked to `src/modules/projects.ts`.** Issue #70 explicitly names this file; extending rather than splitting preserves the import surface in `client.ts`.
+- **Test-account guardrail.** Any live-API code path (probe + integration) MUST reject the run unless `session.username === "doma.spirita@gmail.com"` BEFORE any HTTP call fires. Defense-in-depth with a post-login re-check.
+- **ID generation.** Client-generated 24-hex ObjectIds via `generateObjectId()` for create payloads, same as `projects.create` / `projectGroups.create`.
+- **Issue close coupling.** Closing epic #70 closes when (a) all three child stories are done AND (b) the epic's own "create → place task → rename → delete" integration test passes on the test account.
 
 ## Goal
 
-Ship `client.projectGroups` with full CRUD, extend `client.projects` to carry `groupId`, and prove the wire format empirically against the test account — without changing the existing flat-projects API, without touching unrelated modules, and without any HTTP call leaving the test account's scope.
+Ship `projects.createColumn / updateColumn / deleteColumn` on `MHoroszowski/ticktick-client` against an empirically-captured V2 wire shape, with mocked unit tests for each method, an integration test that completes the epic's "create → place task in it via `columnId` → rename → delete" round trip, README and CHANGELOG `[Unreleased]` updates, and the three child stories plus epic #70 closed on the fork — without changing existing public signatures and without any HTTP call leaving the test account.
 
 ## Criteria
 
 ### Discovery (Phase 0)
-- [ ] ISC-1: Probe script exists at `scripts/probe-nested-projects.ts`.
-- [ ] ISC-2: Probe script throws if `session.username !== "doma.spirita@gmail.com"` before any HTTP call fires.
-- [ ] ISC-3: `GET /api/v2/batch/check/0` response shape captured to `Plans/nested-projects-probe.md` with `projectGroups[]` fields enumerated.
-- [ ] ISC-4: Folder create wire format captured: full request body + response.
-- [ ] ISC-5: Folder list / read shape captured.
-- [ ] ISC-6: Project create-with-groupId wire format captured.
-- [ ] ISC-7: Folder delete cascade behavior captured (children → top-level vs deleted vs error).
-- [ ] ISC-8: `null` vs `"NONE"` semantics for unparenting empirically confirmed and documented.
+- [x] ISC-1: Probe script exists at `scripts/probe-kanban-columns.ts` mirroring the nested-projects probe pattern.
+- [x] ISC-2: Probe script throws if `envUsername !== "doma.spirita@gmail.com"` BEFORE any HTTP call fires.
+- [x] ISC-3: Probe script re-checks `session.username` after login (defense-in-depth) and throws on mismatch.
+- [x] ISC-4: Create-column wire format captured: full request body + response.
+- [x] ISC-5: Update-column wire format captured for rename AND sortOrder.
+- [ ] ISC-6: [DROPPED — see Decisions 2026-05-27T05:15Z; delete endpoint returns server 500 unknown_exception, no working wire format exists]
+- [x] ISC-7: Task-with-columnId behavior captured (during probe step 4: task created with columnId persists; observed in integration test).
+- [x] ISC-8: Probe doc written to `Plans/kanban-columns-probe.md` with wire-shape findings table + step-by-step capture.
+- [x] ISC-9: Probe cleans up every artifact it created (test column(s), test project) before exit.
 
 ### Types (Phase 1)
-- [ ] ISC-9: `TickTickProjectGroup` type added to `src/types.ts` with `id`, `name`, `sortOrder?`, `listType?`, `etag?`, `deleted?` (whatever Phase 0 finds).
-- [ ] ISC-10: `TickTickProjectGroupDraft` added (`name` required; optional `sortOrder`, `listType`).
-- [ ] ISC-11: `TickTickProject` extended with `groupId?: string | null`.
-- [ ] ISC-12: `TickTickProjectDraft` extended with `groupId?: string | null`.
-- [ ] ISC-13: New types re-exported from `src/index.ts`.
-- [ ] ISC-14: TypeDoc comments on each new/changed type — at minimum a one-line comment on `groupId` noting the one-level constraint and pointing at `projectGroups`.
+- [x] ISC-10: `TickTickColumnDraft` type added to `src/types.ts` with required `name` and optional `sortOrder`.
+- [x] ISC-11: `TickTickColumnUpdate` type added to `src/types.ts` as `Partial<TickTickColumnDraft> & { id: string; projectId: string }`.
+- [x] ISC-12: New types re-exported from `src/index.ts`.
+- [x] ISC-13: TypeDoc comments on each new type, including the projectId-required-on-update gotcha on `TickTickColumnUpdate`.
 
 ### Module (Phase 2)
-- [ ] ISC-15: `src/modules/project-groups.ts` exists.
-- [ ] ISC-16: `ProjectGroupsModule` class with `constructor(client: TickTickClient)`.
-- [ ] ISC-17: `.create(draft)` posts to `/api/v2/batch/projectGroup` with `{add:[{id, ...draft}]}` using a client-generated `generateObjectId()`.
-- [ ] ISC-18: `.update({id, ...partial})` posts to `/api/v2/batch/projectGroup` with `{update:[buildPartialUpdateBody(params)]}`.
-- [ ] ISC-19: `.delete(id)` posts to `/api/v2/batch/projectGroup` with `{delete:[id]}`.
-- [ ] ISC-20: `.deleteMany(ids)` posts with `{delete: ids}`.
-- [ ] ISC-21: `.list()` derives `projectGroups[]` from `GET /api/v2/batch/check/0` and returns `readonly TickTickProjectGroup[]`.
-- [ ] ISC-22: `ProjectGroupsModule` instantiated in `TickTickClient` constructor and exposed as `client.projectGroups`.
-- [ ] ISC-23: `ProjectGroupsModule` exported from `src/index.ts`.
+- [x] ISC-14: `projects.createColumn(projectId, draft)` exists on `ProjectsModule`.
+- [x] ISC-15: `createColumn` generates a client-side id via `generateObjectId()` and returns `TickTickColumn`-shaped result.
+- [x] ISC-16: `createColumn` POSTs to `/api/v2/column` with `{add: [{id, projectId, name, sortOrder}]}` (the empirically-captured wire shape).
+- [x] ISC-17: `projects.updateColumn(params: TickTickColumnUpdate)` exists on `ProjectsModule`.
+- [x] ISC-18: `updateColumn` applies `buildPartialUpdateBody` so undefined keys are omitted and present keys (including `sortOrder: 0`) are sent.
+- [x] ISC-19: `updateColumn` POSTs to `/api/v2/column` with `{update: [...]}` envelope (the empirically-captured wire shape).
+- [ ] ISC-20: [DROPPED — delete endpoint is upstream-broken; tracked via ISC-48]
+- [ ] ISC-21: [DROPPED — delete endpoint is upstream-broken; tracked via ISC-48]
+- [x] ISC-22: No new top-level module created — `client.projects.createColumn` etc. are direct methods on `ProjectsModule`; no `client.columns` namespace introduced.
 
-### Project nesting (Phase 3 — no new methods)
-- [ ] ISC-24: `projects.create({name, groupId: "x"})` sends `groupId: "x"` on the wire (asserted in unit test).
-- [ ] ISC-25: `projects.update({id, groupId: "x"})` sends `groupId: "x"` on the wire.
-- [ ] ISC-26: `projects.update({id, groupId: null})` sends `groupId: null` on the wire (unparent).
-- [ ] ISC-27: `projects.update({id})` (no `groupId`) omits the field entirely (partial-update contract preserved).
+### Unit tests (Phase 3)
+- [x] ISC-23: `tests/modules/projects-columns.test.ts` exists.
+- [x] ISC-24: Test asserts `createColumn` payload shape and returned object (2 tests pass).
+- [x] ISC-25: Test asserts `updateColumn` partial-update — rename only, sortOrder only, both, no-op (6 tests pass).
+- [ ] ISC-26: [DROPPED — no deleteColumn method to test]
+- [x] ISC-27: `bun run test` passes all 204 tests across 24 files (8 new + 196 existing, no regression).
 
-### Unit tests (Phase 4)
-- [ ] ISC-28: `tests/modules/project-groups.test.ts` exists.
-- [ ] ISC-29: Test asserts `add` payload shape on create.
-- [ ] ISC-30: Test asserts `update` payload shape uses partial-update.
-- [ ] ISC-31: Test asserts `delete` payload shape.
-- [ ] ISC-32: Test asserts `deleteMany` payload shape.
-- [ ] ISC-33: Test asserts `list()` parses the `batch/check/0` envelope and returns `projectGroups[]`.
-- [ ] ISC-34: Test asserts `projects.update({id, groupId: null})` translates to `groupId: "NONE"` on the wire (per Phase 0 finding; the caller-facing `null` semantic is preserved, the wire receives the V2 sentinel).
-- [ ] ISC-35: Test asserts `groupId` omitted from payload when `undefined` on `projects.update`.
-- [ ] ISC-36: `bun run test` passes all unit tests including the new file.
+### Live tests (Phase 4)
+- [x] ISC-28: `scripts/integration-test.ts` `testProjects()` section extended with a "Kanban columns" sub-block.
+- [x] ISC-29: Integration test guardrail (existing `assertTestAccount`) applies to the new sub-block — runs after the global guardrail.
+- [x] ISC-30: Live: creates a kanban-view project; creates a column; asserts the column appears in `listColumns`. ✓ green.
+- [x] ISC-31: Live: creates a task in that column via `tasks.create({columnId})`. ✓ green.
+- [x] ISC-32: Live: renames the column via `updateColumn({id, projectId, name})`. ✓ green.
+- [x] ISC-33: Live: reorders via `updateColumn({id, projectId, sortOrder})`. ✓ green (combined with rename + verified partial preserves).
+- [ ] ISC-34: [DROPPED — no deleteColumn to exercise]
+- [x] ISC-35: Live: cleans up the test project (cascade removes columns) before exit. ✓ green.
 
-### Live tests (Phase 5)
-- [ ] ISC-37: `scripts/integration-test.ts` extended with a "Nested projects" section.
-- [ ] ISC-38: Integration test refuses (`throw`/exit 1) if `session.username !== "doma.spirita@gmail.com"`.
-- [ ] ISC-39: Live: creates a uniquely-named test folder; asserts it appears in `client.projectGroups.list()`.
-- [ ] ISC-40: Live: creates a project with that `groupId`; asserts the project's `groupId` matches in `client.projects.list()`.
-- [ ] ISC-41: Live: moves an existing test project via `update({id, groupId})`; asserts the move.
-- [ ] ISC-42: Live: unparents via `update({id, groupId: null})`; asserts the project is top-level (no `groupId`).
-- [ ] ISC-43: Live: deletes the test folder; asserts the documented cascade behavior matches Phase 0 finding.
-- [ ] ISC-44: Live test cleans up every artifact it created (folder + projects) before exit.
+### Docs (Phase 5)
+- [x] ISC-36: CHANGELOG `[Unreleased]` includes the new methods under `### Added` plus a `### Known limitations` block documenting the delete bug.
+- [x] ISC-37: README "Kanban Columns" section added showing the create + task-in-column + update + partial-update example, plus a "Known Limitations" entry on the delete bug.
 
-### Docs (Phase 6)
-- [ ] ISC-45: CHANGELOG `[Unreleased]` includes the new module under `### Added`.
-- [ ] ISC-46: README has a "Folders / project groups" section showing create / nest / move / unparent / delete.
+### Issue close
+- [ ] ISC-38: Child stories #13, #14, #15 closed on `MHoroszowski/ticktick-client` with a comment referencing the implementing commit hash; epic #70 closed with a summary comment listing the three closed sub-issues and the shipped methods.
 
 ### Anti-criteria
-- [ ] ISC-47: Anti: No HTTP call against any account other than `doma.spirita@gmail.com` (probe + integration both gated).
-- [ ] ISC-48: Anti: No signature change to existing public methods of `tasks` / `tags` / `habits` / `countdowns` / `focus` / `statistics` / `user` modules.
-- [ ] ISC-49: Anti: No OAuth or Open API V1 code paths introduced (no `developer.ticktick.com` URLs, no bearer-token auth).
-- [ ] ISC-50: Anti: No leftover test artifacts on the test account after `bun run scripts/integration-test.ts` exits (idempotent cleanup).
-- [ ] ISC-51: Anti: No `npm` / `npx` commands in any script, test, or doc added in this work.
+- [ ] ISC-39: Anti: No HTTP call against any account other than `doma.spirita@gmail.com` — probe + integration both gated.
+- [ ] ISC-40: Anti: No signature change to existing public methods of `projects.listColumns/listMembers/list/create/update/delete/deleteMany` — verified by reading the diff for the existing methods.
+- [ ] ISC-41: Anti: No `npm`/`npx` commands in any new script, test, or doc.
+- [ ] ISC-42: Anti: No `client.columns` top-level namespace introduced — methods live on `ProjectsModule`.
+- [ ] ISC-43: Anti: No leftover test artifacts (test project / columns / tasks) on the test account after `bun run scripts/integration-test.ts` exits.
+- [ ] ISC-44: Anti: No silent change to the existing `listColumns` return shape or the `{update: …}` unwrap behavior — verified by reading the existing tests after the change.
+
+### Scope adjustment (added 2026-05-27T05:15Z)
+- [x] ISC-45: Probe findings consolidated in `Plans/kanban-columns-probe.md` with a "Wire shape — confirmed" section listing CREATE shape, UPDATE shape, and the DELETE upstream-bug evidence.
+- [x] ISC-46: `createColumn` implementation matches the confirmed wire shape exactly: `POST /api/v2/column` body `{add: [{id, projectId, name, sortOrder}]}` (see `src/modules/projects.ts`).
+- [x] ISC-47: `updateColumn` implementation sends `projectId` on the update item (TypeScript type enforces; impl forwards via `buildPartialUpdateBody`).
+- [ ] ISC-48: A tracking issue is filed on `MHoroszowski/ticktick-client` (label `tracking: server-bug`) titled "Track: `column delete` — server 500 unknown_exception" with the raw error body captured and a note that `update {deleted:1}` is silently dropped. Issue #15 references this tracking issue and remains open.
 
 ## Test Strategy
 
-| isc | type | check | threshold | tool |
+| ISC | Type | Check | Threshold | Tool |
 |-----|------|-------|-----------|------|
-| ISC-1..ISC-8 | discovery | probe doc enumerates each field | doc present | Read `Plans/nested-projects-probe.md` |
-| ISC-9..ISC-14 | typecheck | types compile, exported, doc-commented | tsc clean | `bun run typecheck` + Grep |
-| ISC-15..ISC-23 | unit | module class instantiates and posts correct payloads | all pass | vitest mock fetch |
-| ISC-24..ISC-27 | unit | partial-update contract preserved on `projects.update` | 4/4 pass | vitest mock fetch |
-| ISC-28..ISC-36 | unit | full test file passes | green | `bun run test` |
-| ISC-37..ISC-44 | integration | live API round trips against test account | 8/8 pass | `bun scripts/integration-test.ts` |
-| ISC-45..ISC-46 | doc | CHANGELOG + README contain expected sections | grep matches | Grep |
-| ISC-47 | anti | no non-test-account HTTP call possible | guardrail throws | Read guardrail + Grep |
-| ISC-48 | anti | no public signature drift | git diff scoped | `git diff main -- src/modules/{tasks,tags,habits,countdowns,focus,statistics,user}.ts` empty for public surface |
-| ISC-49 | anti | no OAuth strings | Grep | `grep -r "developer.ticktick.com\|Bearer " src/ scripts/` empty |
-| ISC-50 | anti | live test exits with no remaining test-prefixed entities | empty result | `client.projectGroups.list()` filter on test prefix |
-| ISC-51 | anti | no npm in added files | Grep | `grep -r "npm\|npx" scripts/probe-nested-projects.ts <new files>` empty |
+| ISC-1..9 | discovery | probe doc enumerates each wire step | doc present, ≥4 steps | Read `Plans/kanban-columns-probe.md` |
+| ISC-10..13 | typecheck | new types compile, exported, doc-commented | `bun run typecheck` clean | `bun run typecheck` + Grep `src/types.ts` |
+| ISC-14..22 | unit | methods exist with expected wire shape | all pass | vitest mock fetch |
+| ISC-23..27 | unit | new test file green, no regression | green | `bun run test` |
+| ISC-28..35 | integration | live round trip 6/6 passes | green | `bun scripts/integration-test.ts` |
+| ISC-36, 37 | doc | CHANGELOG + README contain expected sections | grep matches | Grep |
+| ISC-38 | gh | issues closed | `gh issue view N --json closed` returns `true` | `gh` |
+| ISC-39 | anti | guardrail throws on wrong account | code-read + simulated wrong env | Read probe + integration |
+| ISC-40 | anti | git diff scoped to projects.ts shows no signature change to existing methods | inspection | `git diff` |
+| ISC-41 | anti | no `npm`/`npx` in added files | Grep | `grep -rE 'npm\|npx' scripts/probe-kanban-columns.ts ...` empty |
+| ISC-42 | anti | no `client.columns` symbol in client.ts | Grep | `grep -E "columns:" src/client.ts` returns only existing `listColumns` |
+| ISC-43 | anti | integration test exits with no remaining `[integration-test]` columns in test project | empty | `listColumns()` filter on test prefix |
+| ISC-44 | anti | existing `projects.test.ts` `list()` and `listColumns`-related assertions still pass | green | `bun test tests/modules/projects.test.ts` |
 
 ## Features
 
-| name | satisfies | depends_on | parallelizable |
-|------|-----------|------------|----------------|
-| F1: Discovery probe | ISC-1..8, 47 | — | no |
-| F2: Type extensions | ISC-9..14 | F1 | no |
-| F3: ProjectGroupsModule | ISC-15..23 | F2 | partial w/ F4 |
-| F4: Projects.groupId integration | ISC-24..27 | F2 | partial w/ F3 |
-| F5: Unit tests | ISC-28..36 | F3, F4 | no |
-| F6: Live integration tests | ISC-37..44, 50 | F3, F4 | no |
-| F7: Docs | ISC-45, 46 | F3, F4 | yes (anytime after F4) |
-| F8: Anti-verification sweep | ISC-48, 49, 51 | all | last |
+| Name | Description | Satisfies | Depends on | Parallelizable |
+|------|-------------|-----------|-----------|----------------|
+| F1: Discovery probe | Mirror `probe-nested-projects.ts`; capture create/update/delete wire shape | ISC-1..9, 39 | — | No |
+| F2: Type extensions | Add `TickTickColumnDraft` + `TickTickColumnUpdate`, re-export | ISC-10..13 | F1 | No |
+| F3: ProjectsModule extension | Add 3 methods to `projects.ts` against captured wire shape | ISC-14..22 | F1, F2 | No |
+| F4: Unit tests | New `projects-columns.test.ts` + run full suite | ISC-23..27 | F3 | No |
+| F5: Live integration tests | Extend `integration-test.ts` testProjects() | ISC-28..35, 43 | F3 | No |
+| F6: Docs | CHANGELOG + README | ISC-36, 37 | F3 | Yes (anytime after F3) |
+| F7: Issue close + anti sweep | Close 4 issues; verify anti criteria | ISC-38, 40, 41, 42, 44 | F3, F4, F5, F6 | No |
 
 ## Decisions
 
-- 2026-05-27T03:30Z — **Effort source: context-override.** Classifier returned MINIMAL on the single-word approval "looks good, lets implement"; escalated to E3 because the conversation context made this an implementation of a 7-phase plan. Logged per Algorithm Override Rule 3.
-- 2026-05-27T03:30Z — Module name **`projectGroups`**, no `folders` alias for v1. Matches server vocabulary and existing `client.<resource>` naming pattern.
-- 2026-05-27T03:30Z — `list()` derives from `GET /api/v2/batch/check/0` (full tree pull) per ticktick-py reference. Small payload, single source of truth, no dedicated endpoint exists in V2 for groups alone.
-- 2026-05-27T03:30Z — Per-folder `update({id, sortOrder})` for reordering in v1; batch reorder helper deferred.
-- 2026-05-27T03:30Z — **Skipped Forge delegation despite E3 auto-include binding.** Show-your-math: the plan is fully specified, the codebase patterns are line-for-line mirrors of `projects.ts`, and the delegation overhead (briefing + handoff) exceeds the direct-write cost for ~7 files. Will revisit if Phase 0 reveals unexpected wire shape that requires divergent implementation.
-- 2026-05-27T03:30Z — **Test-account guardrail is hardcoded constant, not config.** Reason: a config-driven allowlist could be silently set to `*` or to a main-account address; a hardcoded string forces a code change + commit to reach a different account, which is the audit trail we want.
-- 2026-05-27T03:46Z — **refined: Phase 0 probe findings reshape the unparent design.** Empirical results against the test account (Plans/nested-projects-probe.md):
-  - **`groupId: null` does NOT unparent.** Step 5 sent `{update:[{id, groupId: null}]}` and the project's `groupId` was unchanged. ticktick-py was wrong on this point (or the server has since changed).
-  - **`groupId: "NONE"` DOES unparent.** Step 6 sent `{update:[{id, groupId: "NONE"}]}` and `groupId` returned as `null` on subsequent GET.
-  - **Folder delete leaves children as orphans-with-dangling-refs.** Step 7 deleted the folder; the child project still has `groupId` pointing at the now-deleted folder id. The UI presumably tolerates this; downstream callers must.
-  - **`projectGroups[]` fields:** `id`, `etag`, `name`, `showAll`, `sortOrder`, `viewMode`, `deleted`, `userId`, `sortType`, `sortOption`, `teamId`, `background`, `timeline`.
-  - **Create folder body shape:** `{add:[{id, name, sortOrder, listType: "group"}]}`. Response is `{id2etag: {<id>: <etag>}, id2error: {}}`.
-- 2026-05-27T03:48Z — **Design choice: translate `null → "NONE"` for `groupId` inside `projects.update`.** Caller-friendly: keeps the universal partial-update contract (`null` = clear) intact from the public API perspective. Internal: `projects.update` detects `groupId === null` in the input and rewrites it to `"NONE"` on the wire. Documented at the type level. Alternative (typing `groupId` as `string | "NONE" | undefined`) was rejected because it breaks contract symmetry with every other nullable field in the library.
+- 2026-05-27T04:35Z — **Project-ISA replacement (not extension).** The prior cycle (`nested-projects`, v0.3.0) was complete at the file's top; this cycle replaces Problem/Vision/Goal/Criteria/etc for the kanban-columns work. Git history of `ISA.md` preserves the prior cycle's full text; CHANGELOG `[0.3.0]` is the durable user-facing record. Doctrine alignment: "iteration on the project IS iteration on this ISA" — replacing reflects the project's current ideal state.
+- 2026-05-27T04:35Z — **Effort source: context-override.** Classifier returned NATIVE on `/goal implement issue #70` (slash-command fast-path); escalated to E3 per Override Rule 3 because the request decomposes into a multi-file build + integration probe.
+- 2026-05-27T04:35Z — **Prior-art citation in issue #70 is over-stated.** Direct read of `hansdoebel/n8n-nodes-ticktick` (`gh api git/trees/main?recursive=1` listing of `nodes/TickTick/resources/projects/`) shows it has ProjectCreate/Update/Delete/Get/GetUsers but NO ColumnCreate/Update/Delete. `lazeroffmichael/ticktick-py`, `jen6/ticktick-mcp`, `jacepark12/ticktick-mcp`, `shidhincr/LookUp` likewise have no column-mutation code. This is genuinely undocumented; live probe against test account is required.
+- 2026-05-27T04:35Z — **No `client.columns` top-level namespace.** Issue #70 explicitly names the touchpoint `src/modules/projects.ts`. Mirror the `listColumns`/`listMembers` pattern: flat methods on `ProjectsModule`. Reconsider only if Phase 0 turns up a wire-level reason to split (it shouldn't).
+- 2026-05-27T04:35Z — **Forge skipped despite E3 auto-include binding.** Show-your-math: 3 new endpoints, ~5 files touched, patterns line-for-line mirror `projects.create/update/delete` already in the same file. Briefing + handoff cost (writing the brief, parsing Forge output, integrating diffs) exceeds direct-write cost. Same justification as the just-completed nested-projects cycle (Decisions 2026-05-27T03:30Z). Will revisit if Phase 0 reveals an unexpected wire shape that requires divergent implementation.
+- 2026-05-27T04:35Z — **Test-account guardrail: hardcoded constant, not config.** Same rationale as nested-projects: a config-driven allowlist could be silently set to `*`; hardcoded string forces a commit-to-change audit trail.
+- 2026-05-27T04:35Z — **Cato NOT fired (E3 tier).** Rule 2a is E4/E5 only. Advisor at commitment boundary (per Rule 2) and ReReadCheck at VERIFY are sufficient at E3.
+- 2026-05-27T05:15Z — **refined: scope reduced to create + update; delete is an upstream-server bug.** Six rounds of probing (`probe-kanban-columns.ts` through `probe-kanban-columns-v6.ts`, all in `scripts/`) established:
+  - **CREATE** works: `POST /api/v2/column` body `{add:[{id, projectId, name, sortOrder?}]}` → `{id2etag, id2error}`, column persists.
+  - **UPDATE** works (with hidden requirement): `POST /api/v2/column` body `{update:[{id, projectId, name?, sortOrder?, etag?}]}` → `{id2etag, id2error}`, column updates. **`projectId` is REQUIRED on the update item or the server silently no-ops** (returns 200 with empty `id2etag` and changes are dropped). This is the breakthrough that turned the no-op of v3-step-2 into success.
+  - **DELETE is upstream-broken.** `POST /api/v2/column` with `{delete:[id-string]}` returns 500. With `{delete:[{id,projectId}]}` the server returns `200 + concatenated 500 body` containing `"errorCode":"unknown_exception"` — caught via raw fetch in v5/V2. Soft-delete via `update {deleted:1}` is accepted (200 + new etag) but the `deleted` flag is dropped on the persisted record (verified in v6). No discoverable workaround exists at the V2 cookie-session API surface.
+  - **Decision:** Mirror the existing tracking-issue pattern (`tasks.listTrash`, `focus.getHeatmap`, `tasks.move` — README "Known Limitations"). Ship CREATE + UPDATE on `projects.*`; document DELETE as an upstream server bug with the exact error captured. Close stories #13 and #14, leave #15 OPEN with the findings; leave epic #70 OPEN with a comment surfacing the partial-ship and the upstream tracking. **The ISA is now scoped to create + update.** Anti-criterion ISC-44 (no silent change to `listColumns`) still holds.
+- 2026-05-27T05:15Z — **ISCs revised:** Drop the delete-path ISCs from the in-scope set (ISC-6, ISC-20, ISC-21, ISC-26, ISC-34); add ISC-45..ISC-48 to cover the wire-shape findings doc, the create endpoint, the update endpoint (with the projectId requirement), and the tracking issue. Tombstone the dropped ISCs per the v6.2.0 ID-stability rule.
 
 ## Changelog
 
-### 2026-05-27 — Nested projects shipped
+### 2026-05-27 — Nested projects shipped (v0.3.0)
+- **Conjectured:** `groupId: null` on `projects.update` would clear the folder via the partial-update contract.
+- **Refuted by:** Live probe step 5 — sending `{update:[{id, groupId: null}]}` left `groupId` unchanged.
+- **Learned:** V2 requires the literal `"NONE"` as the unparent sentinel; JSON `null` is treated as no-op.
+- **Criterion now:** Library translates caller-side `null` to `"NONE"` on the wire; public API still accepts `null`. Shipped in `projects.ts:GROUP_UNPARENT_SENTINEL`, CHANGELOG `[0.3.0]`, README "Folders" section.
 
-- **Conjectured (OBSERVE):** `groupId: null` on `projects.update` would clear the folder assignment via the partial-update contract — same as every other nullable field in the library.
-- **Refuted by (EXECUTE step 5 of probe):** Sending `{update:[{id, groupId: null}]}` left `groupId` unchanged in the server response; the project remained nested.
-- **Learned:** V2 batch/project update treats JSON `null` for `groupId` as "no change," and requires the literal string `"NONE"` as the unparent sentinel. This is a per-field server quirk, not a contract change in the library.
-- **Criterion now:** `client.projects.update({id, groupId: null})` translates `null` to `"NONE"` on the wire; the public API still accepts `null` so the universal partial-update contract holds at the caller boundary. Type, behavior, and rationale documented in `src/modules/projects.ts:11-30`, CHANGELOG `[Unreleased]`, and README "Folders (Project Groups)" section.
-
-### 2026-05-27 — Folder delete is non-cascading
-
-- **Conjectured:** Folder delete would either error on non-empty folders or move children to top-level.
-- **Refuted by (EXECUTE step 7 of probe):** Folder deleted successfully while a child project still existed; the child survived with a `groupId` referencing the now-deleted folder (dangling reference).
-- **Learned:** TickTick's V2 does not enforce referential integrity between projects and their projectGroup. Callers who care about clean state must unparent children before deleting.
-- **Criterion now:** Documented as a wire gotcha in CHANGELOG and README. No library-side cascade helper for v1 (could be added later as `projectGroups.deleteWithChildren()` if there's demand).
+(Full prior-cycle ISA preserved in git history at the previous commit before this rewrite. v0.3.0 is the durable user-facing record of the nested-projects work.)
 
 ## Verification
 
-(See VERIFY-phase table in conversation log; all 51 ISCs tool-verified)
+(Populated at VERIFY phase.)

@@ -34,6 +34,8 @@ export type {
   TickTickProjectGroupUpdate,
   TickTickProjectMember,
   TickTickColumn,
+  TickTickColumnDraft,
+  TickTickColumnUpdate,
   TickTickTag,
   TickTickTagDraft,
   TickTickHabit,
