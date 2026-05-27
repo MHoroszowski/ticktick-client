@@ -216,10 +216,20 @@ async function testProjects() {
       }
     }
 
-    // Cleanup: delete the whole kanban project (cascade removes columns + tasks).
-    // We do NOT exercise deleteColumn because TickTick's V2 column-delete
-    // endpoint is upstream-broken (server 500 unknown_exception). See
-    // Plans/kanban-columns-probe.md and the column-delete tracking issue.
+    if (kanbanColId) {
+      try {
+        await client.projects.deleteColumn(kanbanProjectId, kanbanColId);
+        const cols = await client.projects.listColumns(kanbanProjectId);
+        if (cols.some((c) => c.id === kanbanColId)) {
+          throw new Error(`column ${kanbanColId} still present in listColumns after delete`);
+        }
+        ok(`deleteColumn() — column removed from listColumns`);
+      } catch (e) {
+        fail('deleteColumn()', e);
+      }
+    }
+
+    // Cleanup: delete the kanban project (cascade removes any remaining columns + tasks).
     try {
       await client.projects.delete(kanbanProjectId);
       ok('kanban project cleanup — delete()');

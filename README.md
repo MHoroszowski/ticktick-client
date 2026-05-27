@@ -322,22 +322,25 @@ await client.projects.updateColumn({
 
 // List columns on the project
 const cols = await client.projects.listColumns(project.id);
+
+// Delete a column (tasks in it keep a dangling columnId; UI shows them as uncategorized)
+await client.projects.deleteColumn(project.id, col.id);
 ```
 
 > **`projectId` is required on every `updateColumn` payload.** TickTick's
 > `POST /api/v2/column` endpoint silently drops the update (returns 200
 > with empty `id2etag`) if the update item omits `projectId`. The
-> TypeScript type enforces this so you cannot accidentally omit it. The
-> requirement was discovered empirically — see
-> `Plans/kanban-columns-probe.md`.
+> TypeScript type enforces this AND the implementation throws an actionable
+> runtime error if you bypass the type (e.g. via `as any`). The requirement
+> was discovered empirically — see `Plans/kanban-columns-probe.md`.
 
-> **There is no `deleteColumn` method.** TickTick's V2 column-delete
-> endpoint is upstream-broken (returns server 500 `unknown_exception`
-> for every payload shape we tried, and soft-delete via `update {deleted: 1}`
-> is silently dropped). See **Known Limitations** below. Workaround:
-> reassign the column's tasks via
-> `tasks.update({ id, projectId, columnId: <other-column-id> })`, or
-> delete and recreate the parent project.
+> **Wire-shape gotcha on delete:** `POST /api/v2/column` body for delete
+> uses the key **`columnId`** (not `id`) on the delete item:
+> `{delete: [{columnId, projectId}]}`. Sending `{delete: [id-string]}` or
+> `{delete: [{id, projectId}]}` returns server 500 `unknown_exception` —
+> the bug is the field name, not the endpoint. This was discovered after
+> six API-only probe rounds via an Interceptor capture of the TickTick
+> web UI's actual delete request.
 
 ### Folders (Project Groups)
 
@@ -559,20 +562,6 @@ Tested approaches that failed:
 ### Trash Listing Broken ([#33](https://github.com/jaeyeonling/ticktick-client/issues/33))
 
 `listTrash()` calls `GET /api/v2/project/{id}/tasks?status=-1`, but the status filter is **ignored** server-side. Deleted tasks are not retrievable via any known REST endpoint. `restore()` works if you already know the task ID.
-
-### Kanban Column Delete Returns 500
-
-TickTick's V2 column-delete endpoint is **upstream-broken**. After six
-probe iterations on 2026-05-27 against the test account covering REST
-DELETE, batch envelopes, `{deleteIds: [...]}`, soft-delete via
-`update {deleted: 1}`, full-record bodies, kebab paths, and per-id verb
-paths, every shape either returned 404 or a server 500 containing
-`"errorCode":"unknown_exception"`. The closest shape —
-`POST /api/v2/column` with body `{delete: [{id, projectId}]}` — returns
-a malformed `200+500` body hybrid with the same error. The library
-therefore ships no `deleteColumn` method; the third sub-story of fork
-epic #70 (issue #15) stays open pending an upstream fix. Captured wire
-evidence in `Plans/kanban-columns-probe.md`.
 
 ### Focus Analytics Endpoints Return 500 ([#31](https://github.com/jaeyeonling/ticktick-client/issues/31))
 

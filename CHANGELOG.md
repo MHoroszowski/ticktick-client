@@ -9,9 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Kanban column CRUD on `ProjectsModule` (partial — create + update).**
-  Closes the create and rename/reorder halves of fork epic #70 (sub-stories
-  #13 and #14).
+- **Kanban column CRUD on `ProjectsModule` — full create / update / delete.**
+  Closes fork epic #70 and all three sub-stories #13, #14, #15.
   - `client.projects.createColumn(projectId, {name, sortOrder?})` — creates
     a kanban column and returns a `TickTickColumn` with a client-generated
     24-hex ObjectID. Project must be in `viewMode: "kanban"` for the
@@ -21,24 +20,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     to preserve it. **`projectId` is required on every update payload** —
     TickTick's server silently drops the change otherwise (returns 200
     with empty `id2etag`). The TypeScript type enforces this; the
-    implementation forwards it verbatim.
+    implementation also throws an actionable runtime error.
+  - `client.projects.deleteColumn(projectId, columnId)` — removes a kanban
+    column. Tasks that referenced the deleted columnId keep the dangling
+    reference (non-cascading; same behavior as folder-delete); the TickTick
+    UI treats those tasks as "uncategorized" in the kanban view. Reassign
+    tasks via `tasks.update({id, projectId, columnId: <other>})` first if
+    clean state matters.
+  - **Wire-shape gotcha — delete uses `columnId`, not `id`.** The delete
+    item key on the wire is `{columnId, projectId}` rather than the
+    `{id, projectId}` shape that create and update use. Sending
+    `{delete:[id-string]}` or `{delete:[{id, projectId}]}` returns server
+    500 `unknown_exception` — discovered after six rounds of API-only
+    probing before an Interceptor capture of the TickTick web UI's actual
+    delete request revealed the field-name difference. Full discovery
+    trail in `Plans/kanban-columns-probe.md`.
   - New types: `TickTickColumnDraft`, `TickTickColumnUpdate`.
-  - Wire shape verified empirically against the test account; see
-    `Plans/kanban-columns-probe.md` for the capture.
-
-### Known limitations
-
-- **Column delete is upstream-broken.** TickTick's V2 column-delete
-  endpoint returns server 500 `unknown_exception` for every shape we tried
-  (REST DELETE, batch envelopes, `{deleteIds}`, soft-delete via
-  `update {deleted:1}`, full-record bodies, kebab paths, per-id verb
-  paths). After six probe iterations on 2026-05-27 against the test
-  account, no working delete path exists at the V2 cookie-session API
-  surface. Tracked on the fork issue list (label `tracking: server-bug`);
-  the third sub-story of epic #70 (issue #15 — delete a column) remains
-  open pending an upstream fix. Callers that need to clear a kanban
-  column can either delete and recreate the parent project, or reassign
-  the column's tasks via `tasks.update({id, projectId, columnId: <other>})`.
 
 ## [0.3.0] - 2026-05-27
 

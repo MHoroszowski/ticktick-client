@@ -162,23 +162,32 @@ export class ProjectsModule {
   }
 
   /**
-   * **No `deleteColumn` method ships in this library.**
+   * Delete a kanban column.
    *
-   * TickTick's V2 column-delete endpoint is **server-side broken**. After
-   * six probe iterations against the test account on 2026-05-27 — covering
-   * REST DELETE, batch envelopes, `{deleteIds}`, soft-delete via
-   * `update {deleted: 1}`, full-record bodies, kebab paths, and per-id
-   * verb paths — every path either 404s, returns 200 with empty `id2etag`
-   * (silent no-op), or returns a concatenated 200+500 body containing
-   * `"errorCode":"unknown_exception"`. No working delete shape exists at
-   * the cookie-session API surface.
+   * Hits `POST /api/v2/column` with body `{delete: [{columnId, projectId}]}`.
    *
-   * Tracked as a `tracking: server-bug` issue on the fork; see issue #15
-   * and the column-delete tracking issue for the captured wire evidence.
-   * Callers that need to clear a kanban column should currently delete and
-   * recreate the parent project, or reassign the column's tasks via
-   * `tasks.update({ id, projectId, columnId: <other-column-id> })`.
+   * **Gotcha — field name.** The delete item uses the key **`columnId`**,
+   * NOT `id`. This is unique to the column-delete payload; create and
+   * update both use `id`. Six rounds of API probing with `{delete:[id-string]}`
+   * and `{delete:[{id, projectId}]}` all returned server 500
+   * `unknown_exception` — the bug was the field name, not the endpoint.
+   * Discovered via Interceptor capture of the TickTick web UI's actual
+   * delete request on 2026-05-27. Full discovery trail in
+   * `Plans/kanban-columns-probe.md`.
+   *
+   * **Post-delete task behavior:** tasks that referenced the deleted
+   * `columnId` keep the dangling reference on their `columnId` field
+   * (same non-cascading behavior as folder-delete; verified during
+   * Interceptor capture). The TickTick web UI silently treats those
+   * tasks as "uncategorized" in the kanban view. If clean state matters,
+   * reassign tasks via `tasks.update({id, projectId, columnId: <other>})`
+   * before deleting the column.
    */
+  async deleteColumn(projectId: string, columnId: string): Promise<void> {
+    await this.client.request('POST', '/api/v2/column', {
+      delete: [{ columnId, projectId }],
+    });
+  }
 
   /**
    * List members of a shared project.

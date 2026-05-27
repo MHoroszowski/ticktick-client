@@ -145,3 +145,43 @@ describe('ProjectsModule.updateColumn() — partial-update contract with require
     expect(mockFetch.calls).toHaveLength(0);
   });
 });
+
+describe('ProjectsModule.deleteColumn() — payload uses `columnId` key (not `id`)', () => {
+  it('POSTs to /api/v2/column with {delete:[{columnId, projectId}]} envelope', async () => {
+    const { client, mockFetch } = createClient([
+      { status: 200, body: { id2etag: {}, id2error: {} } },
+    ]);
+    await client.projects.deleteColumn('proj-1', 'col-1');
+
+    const [url, init] = mockFetch.calls[0]!;
+    expect(url).toContain('/api/v2/column');
+    expect(init?.method).toBe('POST');
+
+    const body = JSON.parse(init!.body as string) as {
+      delete: Array<{ columnId: string; projectId: string }>;
+    };
+    expect(body.delete).toHaveLength(1);
+    expect(body.delete[0]).toEqual({ columnId: 'col-1', projectId: 'proj-1' });
+  });
+
+  it('uses `columnId` not `id` on the delete item (regression guard)', async () => {
+    const { client, mockFetch } = createClient([
+      { status: 200, body: { id2etag: {}, id2error: {} } },
+    ]);
+    await client.projects.deleteColumn('proj-1', 'col-1');
+
+    const body = JSON.parse(mockFetch.calls[0]![1]!.body as string) as {
+      delete: Array<Record<string, unknown>>;
+    };
+    // This is the load-bearing assertion. Server returns 500 unknown_exception
+    // if the delete item uses `id` instead of `columnId` — verified empirically.
+    expect(body.delete[0]).toHaveProperty('columnId', 'col-1');
+    expect(body.delete[0]).not.toHaveProperty('id');
+  });
+
+  it('resolves to void on success', async () => {
+    const { client } = createClient([{ status: 200, body: { id2etag: {}, id2error: {} } }]);
+    const result = await client.projects.deleteColumn('proj-1', 'col-1');
+    expect(result).toBeUndefined();
+  });
+});
