@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.session.json
+.ticktick-session.json
 .env
 .env.local
 .omc/

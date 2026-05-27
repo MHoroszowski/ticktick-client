@@ -42,6 +42,25 @@ function section(title: string) {
   console.log(`\n── ${title} ─────────────────────`);
 }
 
+// ───────── Test-account guardrail ─────────
+
+/**
+ * Hardcoded constant — not config. A config-driven allowlist could be
+ * silently widened; a hardcoded string forces a code change + commit to
+ * reach a different account, which is the audit trail we want.
+ */
+const TEST_ACCOUNT_USERNAME = 'doma.spirita@gmail.com';
+
+function assertTestAccount(username: string | undefined): asserts username is string {
+  if (username !== TEST_ACCOUNT_USERNAME) {
+    console.error(
+      `\n❌ Refusing to run: expected username "${TEST_ACCOUNT_USERNAME}", got "${username ?? '(unset)'}".\n` +
+        `   Integration tests only run against the test account.`,
+    );
+    process.exit(1);
+  }
+}
+
 // ───────── Client setup ─────────
 
 const client = new TickTickClient({
@@ -551,6 +570,136 @@ async function testCountdowns() {
   }
 }
 
+// ───────── Project Groups (folders / nested projects) ─────────
+
+async function testProjectGroups() {
+  section('Project Groups (folders)');
+
+  // Defense in depth: re-check the session even though main() already did.
+  assertTestAccount(client.getSession()?.username);
+
+  const folderName = `${TEST_PREFIX} folder ${Date.now()}`;
+  let folderId: string | undefined;
+  let nestedProjectId: string | undefined;
+
+  try {
+    // ── create folder
+    try {
+      const folder = await client.projectGroups.create({ name: folderName });
+      folderId = folder.id;
+      ok(`create() folder id=${folder.id}`);
+    } catch (e) {
+      fail('create()', e);
+      return;
+    }
+
+    // ── list folders includes the new one
+    try {
+      const groups = await client.projectGroups.list();
+      const found = groups.find((g) => g.id === folderId);
+      if (!found) throw new Error('Created folder not found in list()');
+      ok(`list() finds new folder (total ${groups.length})`);
+    } catch (e) {
+      fail('list()', e);
+    }
+
+    // ── create a project nested in the folder
+    try {
+      const nested = await client.projects.create({
+        name: `${TEST_PREFIX} nested project ${Date.now()}`,
+        groupId: folderId!,
+      });
+      nestedProjectId = nested.id;
+      const projects = await client.projects.list();
+      const fetched = projects.find((p) => p.id === nested.id);
+      if (fetched?.groupId !== folderId) {
+        throw new Error(
+          `Expected groupId ${folderId}, got ${JSON.stringify(fetched?.groupId)}`,
+        );
+      }
+      ok(`projects.create({groupId}) nests project`);
+    } catch (e) {
+      fail('projects.create({groupId})', e);
+    }
+
+    // ── unparent via groupId: null (library translates to "NONE")
+    if (nestedProjectId) {
+      try {
+        await client.projects.update({ id: nestedProjectId, groupId: null });
+        const projects = await client.projects.list();
+        const fetched = projects.find((p) => p.id === nestedProjectId);
+        if (fetched?.groupId != null) {
+          throw new Error(
+            `Expected groupId null after unparent, got ${JSON.stringify(fetched?.groupId)}`,
+          );
+        }
+        ok(`projects.update({groupId: null}) unparents (wire "NONE")`);
+      } catch (e) {
+        fail('unparent via groupId: null', e);
+      }
+
+      // ── re-parent
+      try {
+        await client.projects.update({ id: nestedProjectId, groupId: folderId! });
+        const projects = await client.projects.list();
+        const fetched = projects.find((p) => p.id === nestedProjectId);
+        if (fetched?.groupId !== folderId) {
+          throw new Error(
+            `Expected groupId ${folderId} after re-parent, got ${JSON.stringify(fetched?.groupId)}`,
+          );
+        }
+        ok(`projects.update({groupId: <id>}) moves into folder`);
+      } catch (e) {
+        fail('re-parent', e);
+      }
+    }
+
+    // ── update folder name (partial-update on projectGroup)
+    try {
+      const renamed = `${folderName} (renamed)`;
+      await client.projectGroups.update({ id: folderId!, name: renamed });
+      const groups = await client.projectGroups.list();
+      const found = groups.find((g) => g.id === folderId);
+      if (found?.name !== renamed) {
+        throw new Error(`Expected name "${renamed}", got "${found?.name}"`);
+      }
+      ok(`update() renames folder`);
+    } catch (e) {
+      fail('update()', e);
+    }
+
+    // ── delete folder while child project still exists (cascade probe)
+    try {
+      await client.projectGroups.delete(folderId!);
+      const groups = await client.projectGroups.list();
+      const stillThere = groups.find((g) => g.id === folderId && g.deleted !== 1);
+      if (stillThere) {
+        throw new Error('Folder still present (non-deleted) in list after delete()');
+      }
+      ok(`delete() removes folder (child project may have dangling groupId)`);
+      folderId = undefined;
+    } catch (e) {
+      fail('delete()', e);
+    }
+  } finally {
+    // ── cleanup: delete any remaining test artifacts
+    if (nestedProjectId) {
+      try {
+        await client.projects.delete(nestedProjectId);
+      } catch {
+        // already gone is fine
+      }
+    }
+    if (folderId) {
+      try {
+        await client.projectGroups.delete(folderId);
+      } catch {
+        // already gone is fine
+      }
+    }
+  }
+}
+
 // ───────── Main ─────────
 
 async function main() {
@@ -562,10 +711,14 @@ async function main() {
     console.error('\n❌ Session expired. Please login and try again.');
     process.exit(1);
   }
-  console.log('✅ Authenticated\n');
+
+  // Guardrail: verify we are talking to the test account, NOT a main account.
+  assertTestAccount(client.getSession()?.username);
+  console.log(`✅ Authenticated as test account ${TEST_ACCOUNT_USERNAME}\n`);
 
   await testUser();
   await testProjects();
+  await testProjectGroups();
   await testTasks();
   await testTags();
   await testHabits();

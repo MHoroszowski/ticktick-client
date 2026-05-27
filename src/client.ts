@@ -5,6 +5,7 @@ import type { TickTickSession } from './types.js';
 import type { TickTickSessionStore } from './session-store.js';
 import { TasksModule } from './modules/tasks.js';
 import { ProjectsModule } from './modules/projects.js';
+import { ProjectGroupsModule } from './modules/project-groups.js';
 import { TagsModule } from './modules/tags.js';
 import { HabitsModule } from './modules/habits.js';
 import { FocusModule } from './modules/focus.js';
@@ -51,6 +52,7 @@ const BASE_HEADERS = {
 export class TickTickClient {
   readonly tasks: TasksModule;
   readonly projects: ProjectsModule;
+  readonly projectGroups: ProjectGroupsModule;
   readonly tags: TagsModule;
   readonly habits: HabitsModule;
   readonly focus: FocusModule;
@@ -80,6 +82,7 @@ export class TickTickClient {
 
     this.tasks = new TasksModule(this);
     this.projects = new ProjectsModule(this);
+    this.projectGroups = new ProjectGroupsModule(this);
     this.tags = new TagsModule(this);
     this.habits = new HabitsModule(this);
     this.focus = new FocusModule(this);

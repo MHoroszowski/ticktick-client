@@ -158,6 +158,12 @@ export type TickTickProject = {
   readonly permission?: string;
   readonly closed?: boolean | null;
   readonly sortOrder?: number;
+  /**
+   * Folder (projectGroup) the project lives under. `null` (or absent) means
+   * top-level. Folders are one level only — folders cannot contain folders.
+   * Manage folders via {@link TickTickClient.projectGroups}.
+   */
+  readonly groupId?: string | null;
 };
 
 export type TickTickProjectDraft = {
@@ -165,6 +171,55 @@ export type TickTickProjectDraft = {
   readonly color?: string;
   readonly kind?: 'TASK' | 'NOTE';
   readonly viewMode?: 'list' | 'kanban' | 'timeline';
+  /**
+   * Nest the new project inside a folder. Pass the folder id from
+   * {@link ProjectGroupsModule.create} or `.list()`. Pass `null` (on
+   * `projects.update`) to unparent — the library translates `null` to the
+   * server's `"NONE"` sentinel internally. Folders are one level only.
+   */
+  readonly groupId?: string | null;
+};
+
+/**
+ * A folder / projectGroup — a one-level container for projects.
+ *
+ * TickTick calls these "projectGroups" on the wire and "folders" in the UI.
+ * This library uses the server name everywhere.
+ *
+ * **One level only.** Folders cannot contain other folders. A project can
+ * live in at most one folder, set via {@link TickTickProject.groupId}.
+ *
+ * Verified 2026-05-27 via live probe against `doma.spirita@gmail.com`:
+ * see `Plans/nested-projects-probe.md` for the full wire shape capture.
+ */
+export type TickTickProjectGroup = {
+  readonly id: string;
+  readonly name: string;
+  readonly sortOrder?: number;
+  /** Server-assigned change marker; updates on every edit. */
+  readonly etag?: string;
+  /** `0` = active, `1` = deleted. */
+  readonly deleted?: number;
+  /** Owner's numeric TickTick userId. */
+  readonly userId?: number;
+  /** Whether the folder shows all child projects expanded by default. */
+  readonly showAll?: boolean;
+  /** UI sort criterion the folder applies to its children (`project`, etc.). */
+  readonly sortType?: string;
+  readonly sortOption?: string | null;
+  readonly viewMode?: string | null;
+  readonly teamId?: string | null;
+};
+
+export type TickTickProjectGroupDraft = {
+  readonly name: string;
+  readonly sortOrder?: number;
+  /** Defaults to `"group"` — the only value observed in live probes. */
+  readonly listType?: string;
+};
+
+export type TickTickProjectGroupUpdate = Partial<TickTickProjectGroupDraft> & {
+  readonly id: string;
 };
 
 export type TickTickColumn = {

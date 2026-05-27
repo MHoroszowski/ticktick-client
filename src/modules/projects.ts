@@ -9,6 +9,26 @@ import type {
 } from '../types.js';
 
 /**
+ * V2 sentinel for "clear the folder assignment." Sending JSON `null` does
+ * NOT unparent — verified empirically 2026-05-27 (Plans/nested-projects-probe.md
+ * step 5). The library translates caller-facing `groupId: null` to this
+ * string on the wire so the universal partial-update contract still holds
+ * from the caller's perspective.
+ */
+const GROUP_UNPARENT_SENTINEL = 'NONE';
+
+/**
+ * Rewrite caller-side `groupId: null` to the V2 wire sentinel `"NONE"`.
+ * Everything else passes through unchanged.
+ */
+function normalizeGroupId<T extends { groupId?: string | null }>(params: T): T {
+  if ('groupId' in params && params.groupId === null) {
+    return { ...params, groupId: GROUP_UNPARENT_SENTINEL } as T;
+  }
+  return params;
+}
+
+/**
  * Raw response shape for `GET /api/v2/column`. The endpoint returns a
  * wrapper object, not a bare array — historical bug: the library used to
  * type this as `readonly TickTickColumn[]` and return whatever the server
@@ -28,15 +48,16 @@ export class ProjectsModule {
 
   async create(draft: TickTickProjectDraft): Promise<TickTickProject> {
     const id = generateObjectId();
+    const wireDraft = normalizeGroupId(draft);
     await this.client.request('POST', '/api/v2/batch/project', {
-      add: [{ id, ...draft }],
+      add: [{ id, ...wireDraft }],
     });
     return { id, ...draft };
   }
 
   async update(params: Partial<TickTickProjectDraft> & { id: string }): Promise<void> {
     await this.client.request('POST', '/api/v2/batch/project', {
-      update: [buildPartialUpdateBody(params)],
+      update: [buildPartialUpdateBody(normalizeGroupId(params))],
     });
   }
 

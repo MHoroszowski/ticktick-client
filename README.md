@@ -280,6 +280,51 @@ await client.projects.deleteMany([id1, id2]);
 const columns = await client.projects.listColumns(project.id);
 ```
 
+### Folders (Project Groups)
+
+TickTick supports **one level** of folder nesting — projects can live
+inside a folder; folders cannot live inside other folders. The server
+calls them `projectGroup`; the UI calls them "folder."
+
+```typescript
+// Create a folder
+const folder = await client.projectGroups.create({ name: 'Work' });
+
+// List folders
+const folders = await client.projectGroups.list();
+
+// Create a project nested inside the folder
+const project = await client.projects.create({
+  name: 'Q3 planning',
+  groupId: folder.id,
+});
+
+// Move an existing project into a folder
+await client.projects.update({ id: project.id, groupId: folder.id });
+
+// Unparent a project (move back to top level)
+await client.projects.update({ id: project.id, groupId: null });
+
+// Rename / reorder a folder
+await client.projectGroups.update({ id: folder.id, name: 'Work 2026' });
+await client.projectGroups.update({ id: folder.id, sortOrder: -1 });
+
+// Delete a folder
+await client.projectGroups.delete(folder.id);
+await client.projectGroups.deleteMany([id1, id2]);
+```
+
+> **Wire detail:** the V2 batch/project endpoint does NOT accept JSON
+> `null` to clear `groupId` — it accepts the literal string `"NONE"`.
+> This library translates caller-side `null` to `"NONE"` on the wire so
+> the universal partial-update contract is preserved at the public API
+> boundary. You always write `groupId: null` to unparent.
+
+> **Folder delete is non-cascading.** Deleting a folder while child
+> projects still reference it leaves those projects with a `groupId`
+> pointing at the now-deleted folder. If you care about clean state,
+> unparent the children first.
+
 ### Tags
 
 ```typescript

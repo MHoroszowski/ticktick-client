@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ProjectGroupsModule` — folders / nested projects.** New top-level
+  module `client.projectGroups` with `create`, `update`, `delete`,
+  `deleteMany`, and `list` methods. Folders are TickTick's one-level
+  container for projects; the server calls them "projectGroups" and the
+  UI calls them "folders" — this library uses the server name everywhere.
+  - `client.projectGroups.create({name})` — create a folder; returns
+    `{id, name, sortOrder}`.
+  - `client.projectGroups.list()` — derives `projectGroups[]` from
+    `GET /api/v2/batch/check/0` (no dedicated list endpoint exists).
+  - `client.projectGroups.update({id, ...partial})` — partial update,
+    same contract as every other `update` method in the library.
+  - `client.projectGroups.delete(id)` / `.deleteMany(ids)`.
+  - New types: `TickTickProjectGroup`, `TickTickProjectGroupDraft`,
+    `TickTickProjectGroupUpdate`.
+- **`groupId` on `TickTickProject` and `TickTickProjectDraft`.** Pass
+  `groupId: "<folder-id>"` to `projects.create` or `projects.update`
+  to nest a project inside a folder. Pass `groupId: null` to unparent.
+  - **Wire detail:** the V2 batch/project endpoint does NOT accept JSON
+    `null` to clear `groupId` — it accepts the literal string `"NONE"`.
+    The library translates caller-side `null` to `"NONE"` on the wire
+    so the universal partial-update contract is preserved at the public
+    API boundary. Verified empirically on 2026-05-27 against the test
+    account; see `Plans/nested-projects-probe.md` for the wire capture.
+  - **Folder delete leaves orphans.** Deleting a folder while child
+    projects exist leaves those projects with a `groupId` referencing
+    the now-deleted folder. The library does not clean this up; callers
+    that care should unparent children first.
+
 ### Changed
 
 - **Unified partial-update contract across every `update` method.** A
