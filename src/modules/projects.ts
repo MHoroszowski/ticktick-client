@@ -148,6 +148,14 @@ export class ProjectsModule {
    * verbatim. Verified empirically 2026-05-27.
    */
   async updateColumn(params: TickTickColumnUpdate): Promise<void> {
+    if (!params.projectId) {
+      throw new Error(
+        'projects.updateColumn: projectId is required on the update payload. ' +
+          'TickTick\'s POST /api/v2/column endpoint silently no-ops (returns 200 ' +
+          'with empty id2etag) when projectId is omitted from the update item. ' +
+          'Pass the column\'s parent projectId on every update.',
+      );
+    }
     await this.client.request('POST', '/api/v2/column', {
       update: [buildPartialUpdateBody(params)],
     });

@@ -128,4 +128,20 @@ describe('ProjectsModule.updateColumn() — partial-update contract with require
     };
     expect(body.update[0]).toEqual({ id: 'col-1', projectId: 'proj-1' });
   });
+
+  it('throws an actionable error if projectId is missing (defense against type bypass)', async () => {
+    const { client, mockFetch } = createClient([
+      { status: 200, body: { id2etag: {}, id2error: {} } },
+    ]);
+
+    // Simulate an untyped JS consumer / `as any` bypass that omits projectId.
+    // The TypeScript type makes this illegal, but the runtime must guard too —
+    // without projectId, TickTick's server silently no-ops with 200, which
+    // is the worst failure mode (looks successful, change discarded).
+    await expect(
+      client.projects.updateColumn({ id: 'col-1' } as unknown as Parameters<typeof client.projects.updateColumn>[0]),
+    ).rejects.toThrow(/projectId is required/);
+
+    expect(mockFetch.calls).toHaveLength(0);
+  });
 });
