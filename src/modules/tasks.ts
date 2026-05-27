@@ -1,4 +1,5 @@
 import { generateObjectId } from '../internal/ids.js';
+import { buildPartialUpdateBody } from '../internal/partial-update.js';
 import type { TickTickClient } from '../client.js';
 import type {
   TickTickTask,
@@ -38,14 +39,19 @@ export class TasksModule {
   }
 
   async create(draft: TickTickTaskDraft): Promise<TickTickTask> {
-    return this.client.request<TickTickTask>('POST', '/api/v2/task', {
-      id: generateObjectId(),
-      ...draft,
-    });
+    return this.client.request<TickTickTask>(
+      'POST',
+      '/api/v2/task',
+      buildPartialUpdateBody({ id: generateObjectId(), ...draft }),
+    );
   }
 
   async update(params: TickTickTaskUpdate): Promise<TickTickTask> {
-    return this.client.request<TickTickTask>('POST', `/api/v2/task/${params.id}`, params);
+    return this.client.request<TickTickTask>(
+      'POST',
+      `/api/v2/task/${params.id}`,
+      buildPartialUpdateBody(params),
+    );
   }
 
   async complete(projectId: string, taskId: string): Promise<void> {
@@ -66,14 +72,20 @@ export class TasksModule {
   async createMany(drafts: readonly TickTickTaskDraft[]): Promise<void> {
     await Promise.all(
       drafts.map((draft) =>
-        this.client.request('POST', '/api/v2/task', { id: generateObjectId(), ...draft }),
+        this.client.request(
+          'POST',
+          '/api/v2/task',
+          buildPartialUpdateBody({ id: generateObjectId(), ...draft }),
+        ),
       ),
     );
   }
 
   async updateMany(params: readonly TickTickTaskUpdate[]): Promise<void> {
     await Promise.all(
-      params.map((p) => this.client.request('POST', `/api/v2/task/${p.id}`, p)),
+      params.map((p) =>
+        this.client.request('POST', `/api/v2/task/${p.id}`, buildPartialUpdateBody(p)),
+      ),
     );
   }
 

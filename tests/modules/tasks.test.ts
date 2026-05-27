@@ -90,6 +90,89 @@ describe('TasksModule', () => {
       expect(mockFetch.calls[0]![0]).toContain('/api/v2/task/task123');
       expect(mockFetch.calls[0]![1]?.method).toBe('POST');
     });
+
+    it('should send only id, projectId, and explicitly-provided fields', async () => {
+      const { client, mockFetch } = createClient([{ status: 200, body: mockTask }]);
+      await client.tasks.update({ id: 'task123', projectId: 'proj123', content: 'New description' });
+      const body = JSON.parse(mockFetch.calls[0]![1]?.body as string);
+      expect(body).toEqual({ id: 'task123', projectId: 'proj123', content: 'New description' });
+      expect(body).not.toHaveProperty('title');
+      expect(body).not.toHaveProperty('dueDate');
+      expect(body).not.toHaveProperty('startDate');
+      expect(body).not.toHaveProperty('priority');
+      expect(body).not.toHaveProperty('tags');
+    });
+
+    it('should preserve explicit null values so the server clears the field', async () => {
+      const { client, mockFetch } = createClient([{ status: 200, body: mockTask }]);
+      await client.tasks.update({
+        id: 'task123',
+        projectId: 'proj123',
+        content: 'Just the content',
+        dueDate: null,
+        startDate: null,
+        repeatFlag: null,
+      });
+      const body = JSON.parse(mockFetch.calls[0]![1]?.body as string);
+      expect(body).toEqual({
+        id: 'task123',
+        projectId: 'proj123',
+        content: 'Just the content',
+        dueDate: null,
+        startDate: null,
+        repeatFlag: null,
+      });
+    });
+
+    it('should strip undefined values but keep nulls', async () => {
+      const { client, mockFetch } = createClient([{ status: 200, body: mockTask }]);
+      await client.tasks.update({
+        id: 'task123',
+        projectId: 'proj123',
+        content: 'New',
+        dueDate: undefined,
+        startDate: null,
+      });
+      const body = JSON.parse(mockFetch.calls[0]![1]?.body as string);
+      expect(body).toEqual({
+        id: 'task123',
+        projectId: 'proj123',
+        content: 'New',
+        startDate: null,
+      });
+      expect(body).not.toHaveProperty('dueDate');
+    });
+
+    it('should preserve falsy non-null values like 0 and empty string', async () => {
+      const { client, mockFetch } = createClient([{ status: 200, body: mockTask }]);
+      await client.tasks.update({
+        id: 'task123',
+        projectId: 'proj123',
+        priority: 0,
+        content: '',
+      });
+      const body = JSON.parse(mockFetch.calls[0]![1]?.body as string);
+      expect(body.priority).toBe(0);
+      expect(body.content).toBe('');
+    });
+  });
+
+  describe('updateMany()', () => {
+    it('should apply partial-update semantics per item', async () => {
+      const { client, mockFetch } = createClient([
+        { status: 200, body: mockTask },
+        { status: 200, body: mockTask },
+      ]);
+      await client.tasks.updateMany([
+        { id: 't1', projectId: 'p1', content: 'First', startDate: undefined },
+        { id: 't2', projectId: 'p2', priority: 3, dueDate: null },
+      ]);
+      const body0 = JSON.parse(mockFetch.calls[0]![1]?.body as string);
+      const body1 = JSON.parse(mockFetch.calls[1]![1]?.body as string);
+      expect(body0).toEqual({ id: 't1', projectId: 'p1', content: 'First' });
+      expect(body0).not.toHaveProperty('startDate');
+      expect(body1).toEqual({ id: 't2', projectId: 'p2', priority: 3, dueDate: null });
+    });
   });
 
   describe('complete()', () => {

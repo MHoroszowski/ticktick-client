@@ -31,6 +31,16 @@ describe('TagsModule - CRUD (#12)', () => {
     expect(body.update[0].color).toBe('#00ff00');
   });
 
+  it('update() should omit undefined fields and preserve explicit null (parent clear)', async () => {
+    const { client, mockFetch } = createClient([{ status: 200, body: {} }]);
+    await client.tags.update({ name: 'work', parent: null });
+    const body = JSON.parse(mockFetch.calls[0]![1]?.body as string);
+    expect(body.update[0]).toEqual({ name: 'work', parent: null });
+    expect(body.update[0]).not.toHaveProperty('color');
+    expect(body.update[0]).not.toHaveProperty('label');
+    expect(body.update[0]).not.toHaveProperty('sortOrder');
+  });
+
   it('delete() should POST delete array with tag name', async () => {
     const { client, mockFetch } = createClient([{ status: 200, body: {} }]);
     await client.tags.delete('work');

@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Unified partial-update contract across every `update` method.** A
+  new shared helper `internal/partial-update.ts` `buildPartialUpdateBody`
+  is now applied uniformly by `tasks.update`, `tasks.updateMany`,
+  `tasks.create`, `tasks.createMany`, `projects.update`, `tags.update`,
+  `habits.update`, and `countdowns.update`. The contract is identical
+  everywhere:
+  - **Omit a key** (or pass `undefined`) → field is excluded from the
+    API request body → TickTick preserves the current value.
+  - **Pass a value** (incl. `0`, `""`, `false`) → field is sent with
+    that value → TickTick updates to that value.
+  - **Pass explicit `null`** → field is sent as `null` → TickTick
+    clears the field (where the type and server permit it; see below).
+
+  Previously each `update` method passed caller params straight to
+  `JSON.stringify`, so any caller that built payloads from generic
+  kwargs (notably MCP-style dispatchers with default `None` values)
+  silently shipped clearing nulls for fields the user never mentioned.
+  The shared helper strips `undefined` only, leaving explicit-null
+  intent intact.
+- `TickTickTaskUpdate` now wraps `TickTickTaskDraft` in `Partial<>`, so
+  only `id` and `projectId` are required.
+- `projects.update` parameter type is now `Partial<TickTickProjectDraft>
+  & { id: string }` (was `TickTickProjectDraft & { id: string }`), so
+  callers can update color/kind/viewMode without re-supplying `name`.
+- `tags.update` parameter type is now `Partial<TickTickTagDraft> & {
+  name: string }` (was `TickTickTagDraft`), so callers can update
+  label/color/parent without re-supplying every field.
+- `focus.start` now uses `!== undefined` instead of `&&` truthy checks
+  for `focusOnId` and `note`, matching the guard pattern already used
+  for `focusOnTitle` and `manual`. Empty-string `focusOnId` or `note`
+  are now correctly forwarded rather than silently dropped.
+
+### Caller guidance
+
+Callers that build payloads from generic kwargs (MCP servers, dynamic
+dispatchers) MUST distinguish "user didn't mention this field" from
+"user wants this field cleared" before calling any `update` method.
+Use a sentinel default (e.g. Python `class _Unset: ...; UNSET =
+_Unset()`) and only forward kwargs whose value is not the sentinel.
+Bare `None` defaults will reach this library as `null` and WILL clear
+the field — that is intentional given the contract above.
+
+The TypeScript types only mark fields as `string | null` where the
+upstream `TickTick<T>` shape declares them nullable (e.g. task
+`dueDate`/`startDate`, tag `parent`). Other fields like project
+`color` or habit `iconRes` are typed as non-null even though the
+runtime helper would forward an explicit `null` for them — clearing
+those fields requires a runtime cast and is not part of the typed
+contract.
+
 ## [0.2.0] - 2026-04-07
 
 ### Added

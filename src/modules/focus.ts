@@ -66,9 +66,9 @@ export class FocusModule {
         op: 'start',
         duration,
         lastPoint: this.#state.lastPoint,
-        ...(options?.focusOnId && { focusOnId: options.focusOnId }),
+        ...(options?.focusOnId !== undefined && { focusOnId: options.focusOnId }),
         ...(options?.focusOnTitle !== undefined && { focusOnTitle: options.focusOnTitle }),
-        ...(options?.note && { note: options.note }),
+        ...(options?.note !== undefined && { note: options.note }),
         ...(options?.manual !== undefined && { manual: options.manual }),
       },
     ]);

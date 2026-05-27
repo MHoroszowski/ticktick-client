@@ -1,4 +1,5 @@
 import { generateObjectId } from '../internal/ids.js';
+import { buildPartialUpdateBody } from '../internal/partial-update.js';
 import type { TickTickClient } from '../client.js';
 import type {
   TickTickHabit,
@@ -56,7 +57,7 @@ export class HabitsModule {
   async update(params: Partial<TickTickHabitDraft> & { id: string }): Promise<void> {
     await this.client.request('POST', '/api/v2/habits/batch', {
       add: [],
-      update: [params],
+      update: [buildPartialUpdateBody(params)],
       delete: [],
     });
   }

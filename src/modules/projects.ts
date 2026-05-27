@@ -1,4 +1,5 @@
 import { generateObjectId } from '../internal/ids.js';
+import { buildPartialUpdateBody } from '../internal/partial-update.js';
 import type { TickTickClient } from '../client.js';
 import type {
   TickTickProject,
@@ -33,9 +34,9 @@ export class ProjectsModule {
     return { id, ...draft };
   }
 
-  async update(params: TickTickProjectDraft & { id: string }): Promise<void> {
+  async update(params: Partial<TickTickProjectDraft> & { id: string }): Promise<void> {
     await this.client.request('POST', '/api/v2/batch/project', {
-      update: [params],
+      update: [buildPartialUpdateBody(params)],
     });
   }
 

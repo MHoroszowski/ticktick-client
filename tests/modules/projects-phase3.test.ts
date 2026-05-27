@@ -29,6 +29,16 @@ describe('ProjectsModule - CRUD (#10)', () => {
     expect(body.update[0].name).toBe('Personal');
   });
 
+  it('update() should omit undefined fields (preserve server-side values)', async () => {
+    const { client, mockFetch } = createClient([{ status: 200, body: {} }]);
+    await client.projects.update({ id: 'proj123', color: '#00ff00' });
+    const body = JSON.parse(mockFetch.calls[0]![1]?.body as string);
+    expect(body.update[0]).toEqual({ id: 'proj123', color: '#00ff00' });
+    expect(body.update[0]).not.toHaveProperty('name');
+    expect(body.update[0]).not.toHaveProperty('kind');
+    expect(body.update[0]).not.toHaveProperty('viewMode');
+  });
+
   it('delete() should POST delete array with single id', async () => {
     const { client, mockFetch } = createClient([{ status: 200, body: {} }]);
     await client.projects.delete('proj123');

@@ -1,3 +1,4 @@
+import { buildPartialUpdateBody } from '../internal/partial-update.js';
 import type { TickTickClient } from '../client.js';
 import type { TickTickTag, TickTickTagDraft } from '../types.js';
 
@@ -21,8 +22,10 @@ export class TagsModule {
     await this.client.request('POST', '/api/v2/batch/tag', { add: drafts });
   }
 
-  async update(draft: TickTickTagDraft): Promise<void> {
-    await this.client.request('POST', '/api/v2/batch/tag', { update: [draft] });
+  async update(draft: Partial<TickTickTagDraft> & { name: string }): Promise<void> {
+    await this.client.request('POST', '/api/v2/batch/tag', {
+      update: [buildPartialUpdateBody(draft)],
+    });
   }
 
   async delete(name: string): Promise<void> {
