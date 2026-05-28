@@ -47,6 +47,66 @@ export type TickTickTask = {
   readonly assignee?: number | null;
   /** User who originally created the task. Numeric TickTick userId. */
   readonly creator?: number | null;
+  /**
+   * The "primary" reminder on the task as an RFC 5545 TRIGGER string
+   * (e.g. `"TRIGGER:PT0S"`, `"TRIGGER:-PT15M"`). The TickTick V2 server
+   * surfaces this alongside the full {@link TickTickTask.reminders} array;
+   * empty string when no reminder is set. Decode with `parseReminderTrigger`.
+   *
+   * **Read-only via this SDK** — see {@link TickTickTask.reminders} for the
+   * full caveat. Setting this field on `TickTickTaskDraft` / `TickTickTaskUpdate`
+   * is NOT supported yet; the write payload is silently dropped by the
+   * server (200 OK + empty field on readback). Pending HAR capture
+   * against the official TickTick web client — see fork issues
+   * [#2](https://github.com/MHoroszowski/ticktick-client/issues/2) and
+   * [#3](https://github.com/MHoroszowski/ticktick-client/issues/3).
+   */
+  readonly reminder?: string;
+  /**
+   * All reminders on the task. Each entry carries a server-stable `id`
+   * and an RFC 5545 TRIGGER string. Examples:
+   *
+   * ```ts
+   * [
+   *   { id: "699bce82e812d5a47082eb3e", trigger: "TRIGGER:PT0S" },
+   *   { id: "699bce82e812d5a47082eb3f", trigger: "TRIGGER:-PT15M" },
+   * ]
+   * ```
+   *
+   * **Read-only via this SDK as of this release.** Reminders set through
+   * the official TickTick clients (web, mobile, desktop) surface here
+   * correctly, but **setting them programmatically requires the V2 wire
+   * format**, which is pending an HAR capture against the official
+   * client — empirical probing (see `scripts/reminders-probe.ts` and
+   * `scripts/reminders-probe-2.ts`) confirmed that `POST /api/v2/task/{id}`
+   * accepts every shape we tried with 200 OK *but silently drops the
+   * field on readback*. See fork issues
+   * [#2](https://github.com/MHoroszowski/ticktick-client/issues/2)
+   * (single time reminder) and
+   * [#3](https://github.com/MHoroszowski/ticktick-client/issues/3)
+   * (multi-reminder array) for the reproduction and the open HAR-capture
+   * task that will close the write path.
+   *
+   * Decode each trigger string into a structured form with
+   * `parseReminderTrigger`; compose new triggers with
+   * `formatReminderTrigger` (helpers ship today and will become useful
+   * once the write path lands — see fork issue
+   * [#4](https://github.com/MHoroszowski/ticktick-client/issues/4)).
+   */
+  readonly reminders?: readonly TickTickReminder[];
+};
+
+/**
+ * A single reminder on a {@link TickTickTask}, as it appears on the V2
+ * wire. The `id` is server-stable across edits; the `trigger` is an
+ * RFC 5545 TRIGGER string (e.g. `"TRIGGER:PT0S"`, `"TRIGGER:-PT15M"`).
+ *
+ * Read-only via this SDK pending HAR capture of the V2 write-path — see
+ * {@link TickTickTask.reminders} for the full status note.
+ */
+export type TickTickReminder = {
+  readonly id: string;
+  readonly trigger: string;
 };
 
 export type TickTickTaskDraft = {
@@ -525,4 +585,65 @@ export type TickTickCountdown = {
   readonly ignoreYear?: boolean;
   readonly remark?: string;
 };
+
+// ───────── Reminder TRIGGER (RFC 5545 §3.8.6.3) ─────────
+
+/**
+ * Duration components for a reminder offset, decomposed into discrete
+ * units. All fields are optional; an empty object represents zero
+ * duration. The semantic helpers `parseReminderTrigger` /
+ * `formatReminderTrigger` use this shape on the structured side of the
+ * conversion to/from RFC 5545 TRIGGER strings.
+ *
+ * Spec note: RFC 5545 duration grammar is `P[nW][nD]T[nH][nM][nS]`. Weeks
+ * (`W`) and the calendar-day/time split (`D`/`T...`) are mutually
+ * exclusive in strict iCal, but TickTick's server accepts the mixed forms
+ * its own UI produces — the library normalizes via the `weeks`-vs-rest
+ * precedence convention documented on `formatReminderTrigger`.
+ */
+export type ReminderDuration = {
+  readonly weeks?: number;
+  readonly days?: number;
+  readonly hours?: number;
+  readonly minutes?: number;
+  readonly seconds?: number;
+};
+
+/**
+ * Structured representation of an RFC 5545 TRIGGER string, returned by
+ * `parseReminderTrigger`. Discriminated union over the three semantic
+ * cases TickTick supports:
+ *
+ * - `{ at: 'due' }` — reminder fires at the task's due time (`TRIGGER:PT0S`)
+ * - `{ before: ReminderDuration }` — fires *before* due (negative trigger,
+ *   e.g. `TRIGGER:-PT15M` → `{ before: { minutes: 15 } }`)
+ * - `{ after: ReminderDuration }` — fires *after* due (positive trigger,
+ *   e.g. `TRIGGER:PT30M` → `{ after: { minutes: 30 } }`)
+ *
+ * Zero-valued fields are dropped on parse — `TRIGGER:-P0DT9H0M0S` decodes
+ * to `{ before: { hours: 9 } }`, not the noisier full-field form.
+ */
+export type ReminderTrigger =
+  | { readonly at: 'due' }
+  | { readonly before: ReminderDuration }
+  | { readonly after: ReminderDuration };
+
+/**
+ * Input shape for `formatReminderTrigger`. Mirrors {@link ReminderTrigger}
+ * but accepts a string shorthand on `before`/`after` for ergonomics:
+ *
+ * - `'15m'` → `{ minutes: 15 }`
+ * - `'1d 9h'` → `{ days: 1, hours: 9 }`
+ * - `'1h 30m'` → `{ hours: 1, minutes: 30 }`
+ * - `'2w'` → `{ weeks: 2 }`
+ *
+ * Shorthand grammar: space-separated `<n><unit>` tokens, where unit is one
+ * of `w`/`d`/`h`/`m`/`s`. Whitespace between tokens is optional
+ * (`'1d9h'` is also accepted). Returns `undefined` from
+ * `formatReminderTrigger` if the shorthand cannot be parsed.
+ */
+export type ReminderTriggerInput =
+  | { readonly at: 'due' }
+  | { readonly before: ReminderDuration | string }
+  | { readonly after: ReminderDuration | string };
 

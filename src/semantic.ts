@@ -1,4 +1,10 @@
-import type { TickTickTaskPriority, TickTickTaskStatus } from './types.js';
+import type {
+  ReminderDuration,
+  ReminderTrigger,
+  ReminderTriggerInput,
+  TickTickTaskPriority,
+  TickTickTaskStatus,
+} from './types.js';
 
 // ───────── Task Priority ─────────
 
@@ -103,4 +109,140 @@ export function parseCheckinStatus(input: string | 0 | 1 | 2): 0 | 1 | 2 | undef
 
 export function formatCheckinStatus(status: 0 | 1 | 2): string {
   return CHECKIN_STATUS_LABELS[status];
+}
+
+// ───────── Reminder TRIGGER (RFC 5545 §3.8.6.3) ─────────
+
+const SHORTHAND_UNIT: Record<string, keyof ReminderDuration> = {
+  w: 'weeks',
+  d: 'days',
+  h: 'hours',
+  m: 'minutes',
+  s: 'seconds',
+};
+
+function parseShorthand(input: string): ReminderDuration | undefined {
+  const compact = input.replace(/\s+/g, '').toLowerCase();
+  if (!/^(\d+[wdhms])+$/.test(compact)) return undefined;
+  const out: Record<string, number> = {};
+  for (const match of compact.matchAll(/(\d+)([wdhms])/g)) {
+    const n = Number(match[1]);
+    const key = SHORTHAND_UNIT[match[2]!]!;
+    out[key] = (out[key] ?? 0) + n;
+  }
+  return Object.keys(out).length ? (out as ReminderDuration) : undefined;
+}
+
+function encodeDuration(d: ReminderDuration): string | undefined {
+  const w = d.weeks ?? 0;
+  let days = d.days ?? 0;
+  const h = d.hours ?? 0;
+  const m = d.minutes ?? 0;
+  const s = d.seconds ?? 0;
+
+  // RFC 5545 weeks-only special form (strict iCal won't mix W with other units).
+  if (w > 0 && days === 0 && h === 0 && m === 0 && s === 0) {
+    return `P${w}W`;
+  }
+  // Mixed: roll weeks into days so the encoded form stays inside the
+  // strict-RFC subset TickTick accepts.
+  days += w * 7;
+
+  if (days === 0 && h === 0 && m === 0 && s === 0) return undefined;
+
+  let body = 'P';
+  if (days > 0) body += `${days}D`;
+  if (h > 0 || m > 0 || s > 0) {
+    body += 'T';
+    if (h > 0) body += `${h}H`;
+    if (m > 0) body += `${m}M`;
+    if (s > 0) body += `${s}S`;
+  }
+  return body;
+}
+
+/**
+ * Build an RFC 5545 TRIGGER string from a structured input.
+ *
+ * Three input shapes:
+ *
+ * - `{ at: 'due' }` → `"TRIGGER:PT0S"` (fires at the task's due time)
+ * - `{ before: ReminderDuration | shorthand }` → negative trigger
+ *   (e.g. `{ before: { minutes: 15 } }` or `{ before: '15m' }` → `"TRIGGER:-PT15M"`)
+ * - `{ after: ReminderDuration | shorthand }` → positive trigger
+ *   (e.g. `{ after: { minutes: 30 } }` → `"TRIGGER:PT30M"`)
+ *
+ * Shorthand grammar: space-separated `<n><unit>` tokens where unit is one
+ * of `w`/`d`/`h`/`m`/`s`. Whitespace is optional (`'1d 9h'` and `'1d9h'`
+ * both parse to `{ days: 1, hours: 9 }`).
+ *
+ * Returns `undefined` for an empty / invalid / zero duration on
+ * `before`/`after` (a zero duration is not a meaningful before/after
+ * offset — use `{ at: 'due' }` instead).
+ *
+ * Encoding note: weeks are emitted as `P{n}W` only when no other field is
+ * set; mixed-form inputs (e.g. `{ weeks: 2, days: 1 }`) are normalized to
+ * `P{days}D` because TickTick's server follows the strict RFC 5545
+ * subset, which forbids mixing `W` with other components.
+ */
+export function formatReminderTrigger(input: ReminderTriggerInput): string | undefined {
+  if ('at' in input) return input.at === 'due' ? 'TRIGGER:PT0S' : undefined;
+
+  const isBefore = 'before' in input;
+  const raw = isBefore ? input.before : 'after' in input ? input.after : undefined;
+  if (raw === undefined) return undefined;
+
+  const dur = typeof raw === 'string' ? parseShorthand(raw) : raw;
+  if (!dur) return undefined;
+
+  const body = encodeDuration(dur);
+  if (!body) return undefined;
+
+  return `TRIGGER:${isBefore ? '-' : ''}${body}`;
+}
+
+const TRIGGER_RE =
+  /^TRIGGER:(-)?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/;
+
+/**
+ * Decode an RFC 5545 TRIGGER string into a structured {@link ReminderTrigger}.
+ *
+ * Returns `undefined` for malformed inputs (anything that doesn't match
+ * the TRIGGER grammar, or `TRIGGER:P` / `TRIGGER:PT` with no duration
+ * components).
+ *
+ * Zero-valued fields are dropped on parse — `"TRIGGER:-P0DT9H0M0S"`
+ * decodes to `{ before: { hours: 9 } }`, not the noisier full-field form.
+ * A trigger whose duration is entirely zero (e.g. `"TRIGGER:PT0S"` or
+ * `"TRIGGER:P0D"`) decodes to `{ at: 'due' }` regardless of sign.
+ */
+export function parseReminderTrigger(input: string): ReminderTrigger | undefined {
+  const m = TRIGGER_RE.exec(input);
+  if (!m) return undefined;
+
+  const [, sign, ws, ds, hs, mins, ss] = m;
+  if (ws === undefined && ds === undefined && hs === undefined && mins === undefined && ss === undefined) {
+    return undefined; // TRIGGER:P or TRIGGER:PT — no components, malformed
+  }
+
+  const w = Number(ws ?? 0);
+  const d = Number(ds ?? 0);
+  const h = Number(hs ?? 0);
+  const min = Number(mins ?? 0);
+  const s = Number(ss ?? 0);
+
+  if (w === 0 && d === 0 && h === 0 && min === 0 && s === 0) {
+    return { at: 'due' };
+  }
+
+  const dur: Record<string, number> = {};
+  if (w > 0) dur.weeks = w;
+  if (d > 0) dur.days = d;
+  if (h > 0) dur.hours = h;
+  if (min > 0) dur.minutes = min;
+  if (s > 0) dur.seconds = s;
+
+  return sign === '-'
+    ? { before: dur as ReminderDuration }
+    : { after: dur as ReminderDuration };
 }

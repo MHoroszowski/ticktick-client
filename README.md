@@ -33,7 +33,9 @@ The table below maps every major TickTick capability to its support status in th
 | | List trash | :no_entry_sign: | `tasks.listTrash()` &mdash; API ignores status filter |
 | | Restore from trash | :warning: | `tasks.restore()` &mdash; works if you know the task ID |
 | | Recurring tasks | :white_check_mark: | via `repeatFlag` / `repeatEndDate` in create/update |
-| | Reminders | :x: | Not implemented |
+| | Reminders &mdash; read | :white_check_mark: | `task.reminder` / `task.reminders` on readback; `parseReminderTrigger()` helper |
+| | Reminders &mdash; write (time-based) | :warning: | helpers ship (`formatReminderTrigger`), write-path pending HAR &mdash; see [#2](https://github.com/MHoroszowski/ticktick-client/issues/2) / [#3](https://github.com/MHoroszowski/ticktick-client/issues/3) |
+| | Reminders &mdash; write (geofence) | :x: | Pending HAR capture &mdash; see [#5](https://github.com/MHoroszowski/ticktick-client/issues/5) |
 | | Attachments | :x: | Not implemented |
 | | Comments | :x: | Not implemented |
 | | Sort order | :white_check_mark: | via `sortOrder` in create/update |
@@ -583,6 +585,38 @@ formatHabitStatus(0);          // 'normal'
 parseCheckinStatus('done');    // 2
 formatCheckinStatus(1);        // 'undone'
 ```
+
+### Reminder TRIGGER (RFC 5545 §3.8.6.3)
+
+```typescript
+import { parseReminderTrigger, formatReminderTrigger } from 'ticktick-client';
+
+formatReminderTrigger({ at: 'due' });           // 'TRIGGER:PT0S'
+formatReminderTrigger({ before: { minutes: 15 } });  // 'TRIGGER:-PT15M'
+formatReminderTrigger({ before: '15m' });       // 'TRIGGER:-PT15M' (shorthand)
+formatReminderTrigger({ before: '1d 9h' });     // 'TRIGGER:-P1DT9H'
+formatReminderTrigger({ before: { weeks: 2 } });     // 'TRIGGER:-P2W'
+formatReminderTrigger({ after: { minutes: 30 } });   // 'TRIGGER:PT30M'
+
+parseReminderTrigger('TRIGGER:PT0S');           // { at: 'due' }
+parseReminderTrigger('TRIGGER:-P0DT9H0M0S');    // { before: { hours: 9 } } — zero fields dropped
+parseReminderTrigger('TRIGGER:-P1DT9H');        // { before: { days: 1, hours: 9 } }
+parseReminderTrigger('TRIGGER:PT30M');          // { after: { minutes: 30 } }
+parseReminderTrigger('garbage');                // undefined
+```
+
+Reminders set through the official TickTick client (web, mobile, desktop) round-trip cleanly through `parseReminderTrigger` &mdash; iterate them on `task.reminders` (each entry is `{ id, trigger }`):
+
+```typescript
+const tasks = await client.tasks.list();
+for (const t of tasks) {
+  for (const rem of t.reminders ?? []) {
+    console.log(rem.trigger, '→', parseReminderTrigger(rem.trigger));
+  }
+}
+```
+
+**Note:** The V2 wire format for *setting* reminders is pending HAR capture &mdash; see [#2](https://github.com/MHoroszowski/ticktick-client/issues/2) and [#3](https://github.com/MHoroszowski/ticktick-client/issues/3). The helpers above produce RFC 5545 strings that callers can use directly once that lands.
 
 ---
 

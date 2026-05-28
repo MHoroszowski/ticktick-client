@@ -890,6 +890,112 @@ async function testActivity() {
   }
 }
 
+// ───────── Reminders (epic #59 — read-only via SDK pending HAR for write) ─────────
+
+/**
+ * Reminders surface in the SDK is read-only as of this release. The V2
+ * write path silently drops reminder fields on POST /api/v2/task/{id}
+ * (200 OK + empty `reminder`/`reminders` on readback). Reproduced
+ * empirically — see `scripts/reminders-probe.ts` and
+ * `scripts/reminders-probe-2.ts` — and matches the same pattern as
+ * sub-issue #5 (geofence): wire shape needs HAR capture from the
+ * official client. See fork issues #2, #3 (write-path pending) and #4
+ * (helpers shipped).
+ *
+ * This test asserts (a) the readback type carries reminder + reminders
+ * with `{id, trigger}` entries when the live account has them, (b)
+ * `parseReminderTrigger` decodes server-stored trigger strings without
+ * loss, and (c) the helpers are wired through the public package surface.
+ */
+async function testReminders() {
+  section('Reminders (epic #59 — readback + helper round-trip)');
+
+  // Helpers wired through the package
+  const { parseReminderTrigger, formatReminderTrigger } = await import('../src/semantic.js');
+
+  // Sanity: helpers behave on canonical inputs.
+  try {
+    if (formatReminderTrigger({ at: 'due' }) !== 'TRIGGER:PT0S') throw new Error('at-due format');
+    if (formatReminderTrigger({ before: { minutes: 15 } }) !== 'TRIGGER:-PT15M')
+      throw new Error('15m format');
+    const parsed = parseReminderTrigger('TRIGGER:-P0DT9H0M0S');
+    if (JSON.stringify(parsed) !== JSON.stringify({ before: { hours: 9 } }))
+      throw new Error(`9h parse mismatch: ${JSON.stringify(parsed)}`);
+    ok('formatReminderTrigger / parseReminderTrigger sanity ok');
+  } catch (e) {
+    fail('helper sanity check', e);
+  }
+
+  // Survey live tasks for any pre-existing reminders (set via official client).
+  let surveyedCount = 0;
+  let withReminders: readonly TickTickTaskWithReminders[] = [];
+  try {
+    const all = await client.tasks.list();
+    surveyedCount = all.length;
+    withReminders = all.filter(
+      (t): t is TickTickTaskWithReminders =>
+        Array.isArray((t as TickTickTaskWithReminders).reminders) &&
+        ((t as TickTickTaskWithReminders).reminders?.length ?? 0) > 0,
+    );
+    ok(`surveyed ${surveyedCount} live tasks → ${withReminders.length} carry reminders`);
+  } catch (e) {
+    fail('reminder readback survey', e);
+  }
+
+  if (withReminders.length === 0) {
+    skip(
+      'reminder readback round-trip',
+      'no live task carries reminders — set one via the official client to exercise this path',
+    );
+  } else {
+    // Pick the first reminder on the first reminded task.
+    const sample = withReminders[0]!;
+    const first = sample.reminders![0]!;
+    try {
+      if (typeof first.id !== 'string' || typeof first.trigger !== 'string') {
+        throw new Error(
+          `expected reminder { id: string, trigger: string }, got ${JSON.stringify(first)}`,
+        );
+      }
+      ok(`reminder readback shape — id=${first.id}, trigger=${first.trigger}`);
+    } catch (e) {
+      fail('reminder readback shape', e);
+    }
+
+    // Round-trip: parse the server's trigger, format it back, compare bytes.
+    try {
+      const parsed = parseReminderTrigger(first.trigger);
+      if (parsed === undefined) {
+        throw new Error(`parseReminderTrigger returned undefined for ${first.trigger}`);
+      }
+      // Re-encode and assert byte equality on canonical forms; if the
+      // server uses a non-canonical form (e.g. "TRIGGER:-P0DT9H0M0S")
+      // the round-trip canonicalises to "TRIGGER:-PT9H" — that's by
+      // design ("drop zero fields"), so we assert structural rather than
+      // byte equality.
+      const reEncoded = formatReminderTrigger(parsed);
+      const reParsed = reEncoded ? parseReminderTrigger(reEncoded) : undefined;
+      if (JSON.stringify(reParsed) !== JSON.stringify(parsed)) {
+        throw new Error(
+          `parse→format→parse not idempotent: ${JSON.stringify(parsed)} ↛ ${JSON.stringify(reParsed)}`,
+        );
+      }
+      ok(`parse→format→parse idempotent on live trigger: ${first.trigger} → ${JSON.stringify(parsed)}`);
+    } catch (e) {
+      fail('helper round-trip on live trigger', e);
+    }
+  }
+}
+
+// Structural typing helper for the readback survey — narrows away
+// optional + readonly to keep the iteration ergonomic.
+type TickTickTaskWithReminders = {
+  readonly id: string;
+  readonly title: string;
+  readonly reminders?: readonly { id: string; trigger: string }[];
+  readonly reminder?: string;
+};
+
 // ───────── Main ─────────
 
 async function main() {
@@ -916,6 +1022,7 @@ async function main() {
   await testStatistics();
   await testCountdowns();
   await testActivity();
+  await testReminders();
 
   console.log('\n══════════════════════════════════════');
   console.log(`✅ ${passed} passed / ❌ ${failed} failed / ⚠️  ${skipped} skipped`);

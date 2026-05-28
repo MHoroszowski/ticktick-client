@@ -15,6 +15,8 @@ export {
   formatHabitStatus,
   parseCheckinStatus,
   formatCheckinStatus,
+  parseReminderTrigger,
+  formatReminderTrigger,
 } from './semantic.js';
 
 export type {
@@ -53,4 +55,8 @@ export type {
   TickTickActivityActor,
   TickTickActivityDeviceChannel,
   TickTickActivityPaginationParams,
+  TickTickReminder,
+  ReminderDuration,
+  ReminderTrigger,
+  ReminderTriggerInput,
 } from './types.js';

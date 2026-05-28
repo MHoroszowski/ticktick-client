@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Reminder semantic helpers + readback typing (epic #59 — sub-issues #2, #3, #4 partial).**
+  RFC 5545 §3.8.6.3 `TRIGGER` parse + format helpers shipped (#4 closed);
+  read-only readback typing for the V2 reminder surface on `TickTickTask`
+  (#2/#3 readback half). Write path on `POST /api/v2/task/{id}` is silently
+  dropped by the server (200 OK + empty field on readback) across every
+  shape probed — string array, object form with `{id, trigger}`, scalar
+  field, combined, multi-array, and explicit clears (see
+  `scripts/reminders-probe.ts` + `scripts/reminders-probe-2.ts`). Fork
+  issues [#2](https://github.com/MHoroszowski/ticktick-client/issues/2)
+  and [#3](https://github.com/MHoroszowski/ticktick-client/issues/3)
+  re-labeled `needs: har-capture`, matching the existing label on
+  sub-issue [#5](https://github.com/MHoroszowski/ticktick-client/issues/5)
+  (geofence). Epic [#59](https://github.com/MHoroszowski/ticktick-client/issues/59)
+  stays open pending HAR capture against the official client.
+  - `parseReminderTrigger(trigger: string)` → `{ at: 'due' } | { before: ReminderDuration } | { after: ReminderDuration } | undefined`. Drops zero-valued fields on parse (e.g. `"TRIGGER:-P0DT9H0M0S"` → `{ before: { hours: 9 } }`).
+  - `formatReminderTrigger(input)` → RFC 5545 string. Accepts both
+    structured `{ minutes: 15 }` and shorthand `'15m'` / `'1d 9h'`
+    durations on `before`/`after`. Returns `undefined` for empty / all-zero
+    / malformed input.
+  - New types: `TickTickReminder` (`{ id, trigger }` readback shape),
+    `ReminderTrigger`, `ReminderTriggerInput`, `ReminderDuration`.
+  - `TickTickTask` readback now carries `reminder?: string` and
+    `reminders?: readonly TickTickReminder[]` — reminders set through
+    the official TickTick clients surface correctly via `tasks.list()`
+    and friends; lossless decode via `parseReminderTrigger`.
+  - **Out of scope this release:** sub-issue
+    [#5](https://github.com/MHoroszowski/ticktick-client/issues/5)
+    (location/geofence reminders) — explicitly deferred; needs separate
+    HAR capture.
+  - **Helper status note:** `formatReminderTrigger` produces RFC 5545
+    trigger strings that callers cannot yet attach to tasks via this
+    SDK (write-path pending). Helpers are immediately useful for (a)
+    decoding existing reminders, (b) any V1/OAuth integration that
+    speaks the same TRIGGER format, and (c) zero-friction adoption once
+    the write path lands.
+
 - **`ActivityModule` — activity feed / history.** New top-level module
   `client.activity` exposing the two endpoints the TickTick Premium web
   UI uses for its "View previous changes" feature. Closes fork epic #66

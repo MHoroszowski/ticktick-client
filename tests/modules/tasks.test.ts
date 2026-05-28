@@ -157,6 +157,36 @@ describe('TasksModule', () => {
     });
   });
 
+  describe('reminders readback typing', () => {
+    // The TickTick V2 server returns reminders as { reminder: string, reminders:
+    // [{ id, trigger }] }. Setting them via /api/v2/task is silently dropped
+    // (200 OK + empty field on readback) — see fork issues #2 and #3.
+    // These tests pin the *readback* type so callers can iterate reminders set
+    // through the official TickTick clients.
+    it('surfaces reminders array of { id, trigger } objects on readback', async () => {
+      const taskWithReminders: TickTickTask = {
+        id: 'task123',
+        projectId: 'proj123',
+        title: 'reminded',
+        status: 0,
+        reminder: 'TRIGGER:PT0S',
+        reminders: [
+          { id: 'rem-1', trigger: 'TRIGGER:PT0S' },
+          { id: 'rem-2', trigger: 'TRIGGER:-PT15M' },
+        ],
+      };
+      const { client } = createClient([
+        { status: 200, body: { syncTaskBean: { update: [taskWithReminders] } } },
+      ]);
+      const tasks = await client.tasks.list();
+      expect(tasks[0]?.reminder).toBe('TRIGGER:PT0S');
+      expect(tasks[0]?.reminders).toEqual([
+        { id: 'rem-1', trigger: 'TRIGGER:PT0S' },
+        { id: 'rem-2', trigger: 'TRIGGER:-PT15M' },
+      ]);
+    });
+  });
+
   describe('updateMany()', () => {
     it('should apply partial-update semantics per item', async () => {
       const { client, mockFetch } = createClient([
