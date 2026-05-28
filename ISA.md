@@ -3,11 +3,11 @@ project: ticktick-client
 task: Implement Activity Feed & History (issue #66 — list activity events for task / project)
 slug: activity-feed-history
 effort: E3
-phase: verify
-progress: 31/32
+phase: complete
+progress: 32/32
 mode: build
 started: 2026-05-27T07:15:00Z
-updated: 2026-05-28T12:08:00Z
+updated: 2026-05-28T12:18:00Z
 algorithm_config:
   effort_source: context-override
   classifier_returned: NATIVE
@@ -108,7 +108,7 @@ Ship `client.activity.listForTask(projectId, taskId)` and `client.activity.listF
 - [x] ISC-28: README "Activity Feed (Premium)" section added with create-task / listForTask / listForProject / pagination / caller-side filter examples + Premium + V1-path callouts.
 
 ### Issue close
-- [ ] ISC-29: #57, #58, epic #66 closed on `MHoroszowski/ticktick-client` with commit-link comments. (Pending in VERIFY phase after commit lands.)
+- [x] ISC-29: #57, #58, epic #66 all closed with commit-link comments referencing `05ef40c`. #57 auto-closed by commit message + extra comment posted; #58 closed with detailed comment; #66 closed with epic summary comment.
 
 ### Anti-criteria
 - [x] ISC-30: Anti: No HTTP call against any account other than `doma.spirita@gmail.com`. Probe scripts + integration test rely on existing `assertTestAccount` guardrail; no non-test-account HTTP call possible.
@@ -150,6 +150,13 @@ Ship `client.activity.listForTask(projectId, taskId)` and `client.activity.listF
 
 ## Changelog
 
+### 2026-05-28 — Activity Feed & History shipped (first OSS implementation)
+
+- **Conjectured:** Issue #66 framed the activity feed as "for shared projects" and labeled it `needs: har-capture` with explicit "no public OSS prior art." Two unknowns going in: (1) does the endpoint require a shared project, and (2) what's the URL shape?
+- **Refuted by:** Interceptor capture against the Premium test account (which has 0 shared projects) returned full activity arrays for both the task-scoped and project-scoped endpoints. Shared-project framing was wrong — the endpoints work on personal projects too. URL shape turned out to be `/api/v1/task/activity/{id}` (id at end) AND `/api/v1/project/{id}/activity` (id BEFORE /activity) — an asymmetric pair, not a uniform shape.
+- **Learned:** (1) `needs: har-capture` + no OSS prior art = go to Interceptor first; the lesson from #70 held — UI capture revealed the task endpoint in seconds. (2) UI capture is a floor not a ceiling — it surfaces the endpoint the user clicked but you still have to probe sibling resources (project-scoped variant was discovered via 5-variant API probe AFTER the task-scoped UI capture). (3) Asymmetric URL shapes happen; the library should hide them from callers and the unit test should pin the literal shape with a regression guard against the alternative.
+- **Criterion now:** Every empirically-discovered endpoint gets (a) a literal-URL unit assertion, (b) a `not.toContain` regression guard against the obvious alternative shape, and (c) an inline `// DO NOT NORMALIZE — see Plans/...-probe.md` code comment at the URL string. All three landed in `activity.ts` + `activity.test.ts` after the advisor flagged the missing inline comments.
+
 ### 2026-05-27 — Kanban Column CRUD shipped (v0.4 candidate)
 - **Conjectured:** TickTick V2 column-delete endpoint was upstream-broken (6 probe iterations all returned 500 unknown_exception).
 - **Refuted by:** Interceptor UI capture of the web app deleting a column revealed the delete item uses key `columnId` (not `id`).
@@ -158,4 +165,39 @@ Ship `client.activity.listForTask(projectId, taskId)` and `client.activity.listF
 
 ## Verification
 
-(Populated at VERIFY phase.)
+| ISC | Method | Evidence |
+|-----|--------|----------|
+| ISC-1..6 | discovery | `Plans/activity-probe.md` written with wire-shape table, 8-step discovery trail, full sample captures for both endpoints, 10 observed action types, pagination behavior, Premium/personal-project scope. |
+| ISC-7..10 | typecheck + Read | `bun run lint` clean. `src/types.ts:265-340` adds five new types; all re-exported from `src/index.ts:46-50`. JSDoc on every new type covers Premium gate + V1 path + action naming pattern. |
+| ISC-11..16 | code-read + tsc | `src/modules/activity.ts` exists with `ActivityModule` class, 2 methods, wired in `client.ts:14,62,93` as `client.activity`. |
+| ISC-17..22 | vitest | `tests/modules/activity.test.ts` — 8 tests, all pass. Full suite: 216/216 across 25 files. |
+| ISC-23..26 | integration | `bun scripts/integration-test.ts` — 78/78 green; new `Activity (Premium feature)` sub-block shows `activity probe task created + renamed`, `listForTask() → 1 events`, `listForTask() pagination → 0 events next page`, `listForProject() → 200 events`, cleanup. |
+| ISC-27, 28 | grep | CHANGELOG `[Unreleased]` Added block + README "Activity Feed (Premium)" section both present. |
+| ISC-29 | gh | #57 + #58 + #66 all closed; commit-link comments link to `05ef40c`. |
+| ISC-30 | code-read | Probe + integration test rely on existing `assertTestAccount`; no non-test-account HTTP call possible. |
+| ISC-31 | git diff | New `src/modules/activity.ts` + additive edits to `client.ts`, `index.ts`, `types.ts`; zero edits to other module files. |
+| ISC-32 | live | `[activity-probe]` task from standalone setup cleaned up via second sweep; `testActivity()` deletes its own probe task at end. |
+
+### Doctrine compliance
+
+- **Rule 1 (Live-probe for user-facing artifacts):** Wire-shape ISCs all backed by live captures (Interceptor UI traffic + follow-up API probes) against the test account.
+- **Rule 2 (Advisor at commitment boundary):** Called once at VERIFY. Verdict: "Mark phase: complete once you confirm the URL assertion test exists." Confirmed (`expect(url).toContain(...)` literal-path assertions + `not.toContain` regression guard on the asymmetric shape) AND added the inline `// DO NOT NORMALIZE` code comments per the advisor's belt-and-suspenders recommendation. Two minor follow-ups noted (known-actions const literal type, endpoint-stability disclaimer) but neither blocks.
+- **Rule 2a (Cato):** SKIPPED (E3 tier; Rule 2a is E4/E5 only).
+- **Rule 3 (Conflict surfacing):** No empirical/advisor conflicts.
+- **Rule 4 (Audit-tool circuit breaker):** N/A (no Cato/Forge/Anvil subprocess this run).
+- **Tier completeness gate (E3):** Problem, Vision, Out of Scope, Constraints, Goal, Criteria, Features, Test Strategy — all present.
+- **Thinking floor (E3 ≥4):** ISA, FeedbackMemoryConsult, Advisor, ReReadCheck — 4/4 verbatim from closed enum.
+- **Delegation floor (E3 soft ≥2):** ISA Skill + `gh` CLI + Interceptor = 3. Forge skipped with show-your-math (pattern mirror of existing modules + capture-driven specification).
+
+### 📦 DELIVERABLE COMPLIANCE
+- D1 (UI capture + findings doc): ✓ `Plans/activity-probe.md`
+- D2 (types): ✓ 5 new types in `types.ts`, all re-exported
+- D3 (module + 2 methods + client wiring): ✓ `src/modules/activity.ts`, `client.activity` exposed
+- D4 (unit tests): ✓ 8 tests in `activity.test.ts`; 216/216 suite green
+- D5 (integration test): ✓ new `testActivity()` section, 4/4 green plus pagination
+- D6 (docs): ✓ CHANGELOG + README
+- D7 (issue close): ✓ #57, #58, #66 all closed with commit-link comments
+
+### 🔄 Re-Read Check
+
+Original ask: `/goal implement issue #66`. Epic #66 acceptance — both sub-stories closed AND probe doc captured AND endpoints implemented. All three asks met. Filter-by-type/actor was in the scope list but not the acceptance; deferred to caller-side filter (one-liner). Epic closed.

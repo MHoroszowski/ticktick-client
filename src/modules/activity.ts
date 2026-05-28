@@ -37,6 +37,11 @@ export class ActivityModule {
     params: TickTickActivityPaginationParams = {},
   ): Promise<readonly TickTickActivityEvent[]> {
     const query = buildPaginationQuery(params);
+    // DO NOT NORMALIZE the URL — empirically verified. The task endpoint puts
+    // the id at the end (`/task/activity/{id}`); the project endpoint puts it
+    // BEFORE `/activity` (`/project/{id}/activity`). The asymmetry is server-
+    // side; refactoring to a single shape will produce 404s. See
+    // `Plans/activity-probe.md`.
     const path = `/api/v1/task/activity/${taskId}${query}`;
     return this.client.request<readonly TickTickActivityEvent[]>('GET', path);
   }
@@ -54,6 +59,11 @@ export class ActivityModule {
     params: TickTickActivityPaginationParams = {},
   ): Promise<readonly TickTickActivityEvent[]> {
     const query = buildPaginationQuery(params);
+    // DO NOT NORMALIZE the URL — empirically verified. The project endpoint
+    // puts the id BEFORE `/activity`; rearranging to `/project/activity/{id}`
+    // (mirroring the task endpoint shape) returns 404. The asymmetry is
+    // server-side; the unit test in `tests/modules/activity.test.ts` carries
+    // a regression guard. See `Plans/activity-probe.md`.
     const path = `/api/v1/project/${projectId}/activity${query}`;
     return this.client.request<readonly TickTickActivityEvent[]>('GET', path);
   }
