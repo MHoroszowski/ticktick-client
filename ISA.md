@@ -3,8 +3,9 @@ project: ticktick-client
 task: Implement Reminders subsystem (epic #59 — sub-issues #2, #3, #4; #5 deferred to user-driven HAR capture)
 slug: reminders-subsystem
 effort: E3
-phase: verify
+phase: complete
 progress: 48/57
+updated: 2026-05-28T20:25:00Z
 mode: build
 started: 2026-05-28T19:30:00Z
 updated: 2026-05-28T19:35:00Z
