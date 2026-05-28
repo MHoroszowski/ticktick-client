@@ -387,6 +387,45 @@ await client.projectGroups.deleteMany([id1, id2]);
 > pointing at the now-deleted folder. If you care about clean state,
 > unparent the children first.
 
+### Activity Feed (Premium)
+
+Fetch the activity feed / history of changes for a task or project.
+This is TickTick's Premium "View previous changes" feature — the
+library is the first OSS client to wrap these endpoints (wire shape
+captured empirically; full trail in `Plans/activity-probe.md`).
+
+```typescript
+// Events for a single task (newest first)
+const taskEvents = await client.activity.listForTask(taskId);
+//
+// Each event has at minimum {id, action, when, deviceChannel, whoProfile};
+// optionally {name, description, content, kind, taskIds} depending on action.
+// action is a discriminator like 'T_CREATE' / 'T_TITLE' / 'T_CONTENT' /
+// 'T_DONE' / 'T_CANCEL' / 'P_CREATE' / 'P_TITLE' / 'P_ADD_COLUMN' / etc.
+
+// Events for an entire project
+const projectEvents = await client.activity.listForProject(projectId);
+
+// Pagination — pass the last event's id as `lastId` and the running
+// count as `skip`. Server returns an empty array when exhausted.
+const first = await client.activity.listForTask(taskId);
+const next  = await client.activity.listForTask(taskId, {
+  skip: first.length,
+  lastId: first[first.length - 1]?.id,
+});
+
+// Caller-side filter (no server-side filter exists)
+const titleChanges = taskEvents.filter((e) => e.action === 'T_TITLE');
+```
+
+> **Premium-only.** Non-Premium accounts will receive a 4xx response from
+> the underlying endpoint. The library does not catch or mask that — your
+> caller should handle the API error.
+
+> **V1 path.** These endpoints live on `/api/v1/...` rather than V2 —
+> activity is one of the few surfaces the library exposes via the older
+> path because that is what the TickTick web UI itself hits.
+
 ### Tags
 
 ```typescript

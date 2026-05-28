@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ActivityModule` — activity feed / history.** New top-level module
+  `client.activity` exposing the two endpoints the TickTick Premium web
+  UI uses for its "View previous changes" feature. Closes fork epic #66
+  and both sub-stories #57 and #58.
+  - `client.activity.listForTask(taskId, {skip?, lastId?})` — fetches
+    activity events for a single task. Hits `GET /api/v1/task/activity/{taskId}`.
+  - `client.activity.listForProject(projectId, {skip?, lastId?})` — fetches
+    activity events for a project. Hits `GET /api/v1/project/{projectId}/activity`
+    (note the asymmetric URL shape vs the task endpoint — id position differs).
+  - Pagination via `{skip, lastId}` — pass the last event's `id` as
+    `lastId` and the running count as `skip` to fetch the next page.
+    Server returns an empty array when the feed is exhausted.
+  - New types: `TickTickActivityEvent`, `TickTickActivityAction`,
+    `TickTickActivityActor`, `TickTickActivityDeviceChannel`,
+    `TickTickActivityPaginationParams`.
+  - **Premium-only.** Non-Premium accounts will receive a 4xx response.
+  - **V1 path.** Activity is one of the few endpoints the library exposes
+    via `/api/v1/...` rather than V2 — that is what the web UI hits.
+  - **First OSS implementation.** No public TickTick client (`ticktick-py`,
+    `n8n-nodes-ticktick`, the various MCP servers) had documented these
+    endpoints. Wire shape captured empirically via Interceptor on
+    2026-05-28; full discovery trail in `Plans/activity-probe.md`.
+
+### Added
+
 - **Kanban column CRUD on `ProjectsModule` — full create / update / delete.**
   Closes fork epic #70 and all three sub-stories #13, #14, #15.
   - `client.projects.createColumn(projectId, {name, sortOrder?})` — creates

@@ -803,6 +803,93 @@ async function testProjectGroups() {
   }
 }
 
+// ───────── Activity (Premium) ─────────
+
+async function testActivity() {
+  section('Activity (Premium feature)');
+
+  // Confirm Premium before exercising the endpoints — endpoint is gated.
+  let isPremium = false;
+  try {
+    const status = await client.user.getStatus();
+    isPremium = status.pro === true;
+    if (!isPremium) {
+      skip('activity tests', 'test account is not Premium (activity feed is Premium-only)');
+      return;
+    }
+  } catch (e) {
+    fail('getStatus() pre-check', e);
+    return;
+  }
+
+  const projectId = await getInboxProjectId();
+  let taskId: string | null = null;
+
+  // Create a probe task + apply a change so the activity feed has events.
+  try {
+    const t = await client.tasks.create({
+      title: `${TEST_PREFIX} activity probe`,
+      projectId,
+      priority: 1,
+    });
+    taskId = t.id;
+    await client.tasks.update({
+      id: taskId,
+      projectId,
+      title: `${TEST_PREFIX} activity probe — renamed`,
+      priority: 3,
+    });
+    ok(`activity probe task created + renamed → ${taskId}`);
+  } catch (e) {
+    fail('activity probe setup', e);
+  }
+
+  if (taskId) {
+    try {
+      const events = await client.activity.listForTask(taskId);
+      if (!Array.isArray(events)) throw new Error('listForTask did not return an array');
+      ok(`listForTask() → ${events.length} events`);
+      if (events.length === 0) {
+        console.log('     (note: server returned 0 events for the fresh task — TickTick may take a moment to index)');
+      }
+    } catch (e) {
+      fail('listForTask()', e);
+    }
+
+    try {
+      // Pagination round-trip — skip past the first batch
+      const first = await client.activity.listForTask(taskId);
+      if (first.length > 0) {
+        const last = first[first.length - 1]!;
+        const next = await client.activity.listForTask(taskId, { skip: first.length, lastId: last.id });
+        if (!Array.isArray(next)) throw new Error('paginated call did not return an array');
+        ok(`listForTask() pagination → next page has ${next.length} events (expected 0 for fresh task)`);
+      } else {
+        skip('listForTask() pagination', 'first page was empty; nothing to paginate');
+      }
+    } catch (e) {
+      fail('listForTask() pagination', e);
+    }
+  }
+
+  try {
+    const projEvents = await client.activity.listForProject(projectId);
+    if (!Array.isArray(projEvents)) throw new Error('listForProject did not return an array');
+    ok(`listForProject() → ${projEvents.length} events`);
+  } catch (e) {
+    fail('listForProject()', e);
+  }
+
+  // Cleanup
+  if (taskId) {
+    try {
+      await client.tasks.delete(projectId, taskId);
+    } catch {
+      // already gone is fine
+    }
+  }
+}
+
 // ───────── Main ─────────
 
 async function main() {
@@ -828,6 +915,7 @@ async function main() {
   await testFocus();
   await testStatistics();
   await testCountdowns();
+  await testActivity();
 
   console.log('\n══════════════════════════════════════');
   console.log(`✅ ${passed} passed / ❌ ${failed} failed / ⚠️  ${skipped} skipped`);

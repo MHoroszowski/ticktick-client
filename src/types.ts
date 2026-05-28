@@ -292,6 +292,90 @@ export type TickTickProjectMember = {
   readonly userCode?: string;
 };
 
+// ───────── Activity ─────────
+
+/**
+ * Originating client of an activity event. Common values observed
+ * empirically: `"web"`, `"ios"`, `"android"`, `"api"`. Typed as the
+ * open string the server actually returns rather than a closed union.
+ */
+export type TickTickActivityDeviceChannel = string;
+
+/**
+ * Activity event action discriminator.
+ *
+ * Naming pattern: `<RESOURCE>_<VERB>` — `T_*` for task-scoped events,
+ * `P_*` for project-scoped events. Empirically observed on 2026-05-28
+ * against the test account: `T_CREATE`, `T_TITLE`, `T_CONTENT`,
+ * `T_DONE`, `T_CANCEL`, `P_CREATE`, `P_TITLE`, `P_ADD_COLUMN`,
+ * `P_COLUMN_TITLE`, `P_DEL_COLUMN`. Many more action types almost
+ * certainly exist (priority, due-date, assignee on shared projects,
+ * task moves, attachments, etc.).
+ *
+ * Typed as `string` rather than a closed union so callers see the
+ * actual server values; pattern-match on the prefix for stable
+ * categorisation.
+ */
+export type TickTickActivityAction = string;
+
+/**
+ * Identity of the actor that performed an activity event.
+ *
+ * On personal projects the only observable field is `isMyself: true`.
+ * On shared projects this likely carries `userId`, `displayName`,
+ * `avatarUrl`, etc. for actions by other users — typed as optional
+ * pending an empirical capture.
+ */
+export type TickTickActivityActor = {
+  readonly isMyself?: boolean;
+  readonly userId?: number;
+  readonly displayName?: string | null;
+  readonly avatarUrl?: string | null;
+};
+
+/**
+ * A single activity event from the TickTick history feed.
+ *
+ * Returned by `client.activity.listForTask(taskId)` and
+ * `client.activity.listForProject(projectId)`. The shape was captured
+ * empirically from the TickTick Premium web UI on 2026-05-28; see
+ * `Plans/activity-probe.md` for the wire-shape table.
+ *
+ * **Premium-only.** TickTick gates the activity-feed feature behind a
+ * Premium subscription. Non-Premium accounts are expected to receive a
+ * 4xx response from the underlying endpoint.
+ */
+export type TickTickActivityEvent = {
+  readonly id: string;
+  readonly action: TickTickActivityAction;
+  /** ISO timestamp with timezone offset, e.g. `"2026-05-27T21:25:33.360+0000"`. */
+  readonly when: string;
+  readonly deviceChannel: TickTickActivityDeviceChannel;
+  readonly whoProfile: TickTickActivityActor;
+  /** Set on events that name a resource (e.g. `P_CREATE`, `P_ADD_COLUMN`). */
+  readonly name?: string;
+  /** Set on `T_CREATE` events — the task description / surrounding context. */
+  readonly description?: string;
+  /** Set on `T_CONTENT` events — the new content / notes value. */
+  readonly content?: string;
+  /** Set on `T_CONTENT` events — usually `"TEXT"`. Other kinds exist for non-text content. */
+  readonly kind?: string;
+  /** Set on events that affect one or more tasks (e.g. `T_CREATE`, `T_DONE`, `T_CANCEL`). */
+  readonly taskIds?: readonly string[];
+};
+
+/**
+ * Optional pagination params accepted by the activity list endpoints.
+ *
+ * The TickTick web UI sends both `skip` (offset) and `lastId` (cursor)
+ * on every paginated call. Pass both to fetch the next page; the server
+ * returns an empty array when the feed is exhausted.
+ */
+export type TickTickActivityPaginationParams = {
+  readonly skip?: number;
+  readonly lastId?: string;
+};
+
 // ───────── Tag ─────────
 
 export type TickTickTagDraft = {

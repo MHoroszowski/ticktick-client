@@ -48,4 +48,9 @@ export type {
   TickTickCountdown,
   TickTickCountdownDraft,
   TickTickCountdownType,
+  TickTickActivityEvent,
+  TickTickActivityAction,
+  TickTickActivityActor,
+  TickTickActivityDeviceChannel,
+  TickTickActivityPaginationParams,
 } from './types.js';
