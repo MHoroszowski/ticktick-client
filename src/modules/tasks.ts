@@ -1,7 +1,9 @@
 import { generateObjectId } from '../internal/ids.js';
 import { buildPartialUpdateBody } from '../internal/partial-update.js';
+import { TickTickBatchError } from '../errors.js';
 import type { TickTickClient } from '../client.js';
 import type {
+  TickTickReminder,
   TickTickTask,
   TickTickTaskDraft,
   TickTickTaskUpdate,
@@ -16,6 +18,63 @@ type BatchCheckResponse = {
     readonly update?: readonly TickTickTask[];
   };
 };
+
+/**
+ * V2 batch/task envelope returned by `POST /api/v2/batch/task`.
+ * `id2etag` maps task ids to their new server etag on success;
+ * `id2error` carries per-task errors (most often etag conflicts).
+ */
+type BatchTaskResponse = {
+  readonly id2etag?: Record<string, string>;
+  readonly id2error?: Record<string, string>;
+};
+
+/**
+ * Normalize a caller-supplied reminders array into the V2 wire shape
+ * `{id, trigger}[]`. String entries get a client-generated id matching
+ * the official client's 24-char hex format. `TickTickReminder` entries
+ * pass through unchanged so callers can preserve server-stable ids on
+ * round-trips. Null means "clear all" and is forwarded as null.
+ */
+function normalizeReminderWrites(
+  reminders: readonly (string | TickTickReminder)[] | null | undefined,
+): readonly TickTickReminder[] | null | undefined {
+  if (reminders === undefined) return undefined;
+  if (reminders === null) return null;
+  return reminders.map((r) =>
+    typeof r === 'string' ? { id: generateObjectId(), trigger: r } : r,
+  );
+}
+
+/**
+ * Has the caller asked us to touch reminders? True iff at least one of
+ * `reminder` (sugar) or `reminders` (canonical) appears in the payload —
+ * including explicit `null` for clears. Field absence (undefined) does
+ * NOT trigger the batch route.
+ */
+function hasReminderIntent(p: {
+  readonly reminder?: unknown;
+  readonly reminders?: unknown;
+}): boolean {
+  return 'reminders' in p || 'reminder' in p;
+}
+
+/**
+ * Collapse `reminder` sugar into a canonical reminders array. If both
+ * are set, `reminders` wins (caller-error-tolerant). Returns the
+ * normalized wire-shape array, `null` for clear, or `undefined` for "no
+ * change."
+ */
+function resolveReminders(p: {
+  readonly reminder?: string | null;
+  readonly reminders?: readonly (string | TickTickReminder)[] | null;
+}): readonly TickTickReminder[] | null | undefined {
+  if ('reminders' in p) return normalizeReminderWrites(p.reminders);
+  if (!('reminder' in p)) return undefined;
+  if (p.reminder === null) return null;
+  if (p.reminder === undefined) return undefined;
+  return [{ id: generateObjectId(), trigger: p.reminder }];
+}
 
 export class TasksModule {
   constructor(private readonly client: TickTickClient) {}
@@ -38,20 +97,161 @@ export class TasksModule {
     );
   }
 
+  /**
+   * Create a task.
+   *
+   * **Reminder handling:** if the draft includes `reminder` (sugar) or
+   * `reminders`, the library executes two HTTP calls under the hood —
+   * (a) `POST /api/v2/task` to create the bare task, then (b)
+   * {@link setReminders} to attach the reminders via the V2 batch sync
+   * endpoint. This is the same pattern the official TickTick web
+   * client uses; the partial-create endpoint silently drops reminder
+   * fields.
+   */
   async create(draft: TickTickTaskDraft): Promise<TickTickTask> {
-    return this.client.request<TickTickTask>(
+    const reminders = resolveReminders(draft);
+    const { reminder: _r, reminders: _rs, ...rest } = draft;
+    const created = await this.client.request<TickTickTask>(
       'POST',
       '/api/v2/task',
-      buildPartialUpdateBody({ id: generateObjectId(), ...draft }),
+      buildPartialUpdateBody({ id: generateObjectId(), ...rest }),
     );
+    if (reminders === undefined) return created;
+    const projectId = created.projectId;
+    return this.setReminders(projectId, created.id, reminders);
   }
 
+  /**
+   * Partial-update a task. By default sends a partial body to
+   * `POST /api/v2/task/{id}` — only the fields you pass are touched.
+   *
+   * **Reminder handling:** if `reminder` (sugar) or `reminders` is in
+   * the params, the library re-routes the entire update through the V2
+   * batch sync endpoint (`POST /api/v2/batch/task`) with full
+   * read-modify-merge-write semantics — this is required because the
+   * partial-update endpoint silently drops reminder fields. All other
+   * fields you pass land in the same batch write; fields you omit
+   * preserve their current value.
+   */
   async update(params: TickTickTaskUpdate): Promise<TickTickTask> {
+    if (hasReminderIntent(params)) {
+      return this.updateWithReminders(params);
+    }
     return this.client.request<TickTickTask>(
       'POST',
       `/api/v2/task/${params.id}`,
       buildPartialUpdateBody(params),
     );
+  }
+
+  /**
+   * Replace the full reminders array on an existing task. Pass `null`
+   * to clear all reminders.
+   *
+   * Implementation note: this is a read-modify-write — the library
+   * fetches the current task body, swaps in the new reminders + the
+   * current etag, and POSTs to `POST /api/v2/batch/task`. Reminder
+   * entries with a `TickTickReminder` shape preserve their existing
+   * `id` (use this on round-trips); plain trigger strings get a
+   * client-generated id.
+   */
+  async setReminders(
+    projectId: string,
+    taskId: string,
+    reminders: readonly (string | TickTickReminder)[] | null,
+  ): Promise<TickTickTask> {
+    return this.updateWithReminders({
+      id: taskId,
+      projectId,
+      reminders,
+    });
+  }
+
+  /**
+   * Internal: read-modify-merge-write through the V2 batch sync
+   * endpoint. Fetches the current task body (so we have all fields +
+   * the current etag), applies the caller's partial overrides plus the
+   * resolved reminders, and POSTs to `POST /api/v2/batch/task` in an
+   * `update` envelope. Returns the post-write task body (re-fetched so
+   * the response reflects the new etag + populated `reminder` scalar).
+   */
+  private async updateWithReminders(
+    params: TickTickTaskUpdate & {
+      readonly reminders?: readonly (string | TickTickReminder)[] | null;
+    },
+  ): Promise<TickTickTask> {
+    const all = await this.list();
+    const current = all.find((t) => t.id === params.id);
+    if (!current) {
+      throw new Error(
+        `tasks.update: task ${params.id} not found (cannot read-modify-write reminders)`,
+      );
+    }
+
+    const resolved = resolveReminders(params);
+    const wireReminders: readonly TickTickReminder[] =
+      resolved === null
+        ? []
+        : resolved !== undefined
+          ? resolved
+          : current.reminders ?? [];
+
+    const { reminder: _r, reminders: _rs, ...overrides } = params;
+    const updateEntry: Record<string, unknown> = {
+      ...current,
+      ...overrides,
+      reminders: wireReminders,
+      reminder: null,
+    };
+
+    // Server silently drops reminders when the task has neither dueDate
+    // nor startDate. Guard at the SDK boundary so callers get a typed
+    // error instead of a 200-OK-empty-readback surprise. Clears
+    // (wireReminders.length === 0) are always allowed — clearing a
+    // dateless task is a no-op but not wrong.
+    if (wireReminders.length > 0) {
+      const dueDate = (updateEntry.dueDate as string | null | undefined) ?? null;
+      const startDate = (updateEntry.startDate as string | null | undefined) ?? null;
+      if (!dueDate && !startDate) {
+        throw new Error(
+          `tasks.setReminders: task ${params.id} has neither dueDate nor startDate — ` +
+            `TickTick silently drops reminders on dateless tasks. Set dueDate ` +
+            `(or startDate) in the same call, or set it first via tasks.update.`,
+        );
+      }
+    }
+
+    const resp = await this.client.request<BatchTaskResponse>('POST', '/api/v2/batch/task', {
+      add: [],
+      update: [updateEntry],
+      delete: [],
+      addAttachments: [],
+      updateAttachments: [],
+      deleteAttachments: [],
+    });
+
+    // Surface per-item failures from the batch envelope. Most common
+    // cause is etag conflict (the task was modified between our read
+    // and our write); callers should catch TickTickBatchError and
+    // retry — the next attempt will re-read the fresh etag.
+    if (resp.id2error && Object.keys(resp.id2error).length > 0) {
+      throw new TickTickBatchError(
+        `batch/task reported per-item failure: ${JSON.stringify(resp.id2error)}`,
+        resp.id2error,
+      );
+    }
+
+    // Re-fetch so the returned task has the server-populated `reminder`
+    // scalar + the new etag (the batch endpoint returns id→etag map,
+    // not the full task body).
+    const fresh = await this.list();
+    const after = fresh.find((t) => t.id === params.id);
+    if (!after) {
+      throw new Error(
+        `tasks.update: task ${params.id} disappeared after batch write`,
+      );
+    }
+    return after;
   }
 
   async complete(projectId: string, taskId: string): Promise<void> {

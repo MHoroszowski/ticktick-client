@@ -4,7 +4,12 @@ export type { TickTickClientOptions } from './client.js';
 export { MemorySessionStore, FileSessionStore } from './session-store.js';
 export type { TickTickSessionStore } from './session-store.js';
 
-export { TickTickError, TickTickAuthError, TickTickApiError } from './errors.js';
+export {
+  TickTickError,
+  TickTickAuthError,
+  TickTickApiError,
+  TickTickBatchError,
+} from './errors.js';
 
 export {
   parseTaskPriority,

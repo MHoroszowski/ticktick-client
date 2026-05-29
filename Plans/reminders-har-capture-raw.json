@@ -1,0 +1,20 @@
+[
+  {
+    "ts": 1780061106138,
+    "url": "https://api.ticktick.com/api/v2/batch/task",
+    "method": "POST",
+    "body": "{\"add\":[],\"update\":[{\"items\":[],\"reminders\":[{\"id\":\"6a1993b0192b3547f10e8614\",\"trigger\":\"TRIGGER:-PT15M\"},{\"id\":\"6a199134192b3547f10e85e3\",\"trigger\":\"TRIGGER:-PT20M\"},{\"id\":\"6a199101192b3547f10e85d9\",\"trigger\":\"TRIGGER:-PT1440M\"}],\"exDate\":[],\"dueDate\":null,\"repeatFirstDate\":\"2026-06-05T16:00:00.000+0000\",\"priority\":0,\"isAllDay\":false,\"repeatFlag\":null,\"progress\":0,\"assignee\":null,\"sortOrder\":-1099511627776,\"startDate\":\"2026-06-05T16:00:00.000+0000\",\"isFloating\":false,\"reminder\":null,\"remindTime\":null,\"status\":0,\"projectId\":\"6a1990b68f08cb3a4c929be5\",\"kind\":null,\"etag\":\"7f86lalo\",\"createdTime\":\"2026-05-29T13:12:36.000+0000\",\"modifiedTime\":\"2026-05-29T13:25:05.000+0000\",\"title\":\"single time based reminder\",\"tags\":[],\"timeZone\":\"America/New_York\",\"content\":\"\",\"id\":\"6a1990c4192b3547f10e85c0\"}],\"delete\":[],\"addAttachments\":[],\"updateAttachments\":[],\"deleteAttachments\":[]}"
+  },
+  {
+    "ts": 1780061121432,
+    "url": "https://api.ticktick.com/api/v2/batch/task",
+    "method": "POST",
+    "body": "{\"add\":[],\"update\":[{\"items\":[],\"reminders\":[{\"id\":\"6a1993b0192b3547f10e8614\",\"trigger\":\"TRIGGER:-PT15M\"},{\"id\":\"6a199134192b3547f10e85e3\",\"trigger\":\"TRIGGER:-PT20M\"},{\"id\":\"6a1993bf192b3547f10e861c\",\"trigger\":\"TRIGGER:-PT60M\"},{\"id\":\"6a199101192b3547f10e85d9\",\"trigger\":\"TRIGGER:-PT1440M\"}],\"exDate\":[],\"dueDate\":null,\"repeatFirstDate\":\"2026-06-05T16:00:00.000+0000\",\"priority\":0,\"isAllDay\":false,\"repeatFlag\":null,\"progress\":0,\"assignee\":null,\"sortOrder\":-1099511627776,\"startDate\":\"2026-06-05T16:00:00.000+0000\",\"isFloating\":false,\"reminder\":null,\"remindTime\":null,\"status\":0,\"projectId\":\"6a1990b68f08cb3a4c929be5\",\"kind\":null,\"etag\":\"1vswwe0a\",\"createdTime\":\"2026-05-29T13:12:36.000+0000\",\"modifiedTime\":\"2026-05-29T13:25:20.000+0000\",\"title\":\"single time based reminder\",\"tags\":[],\"timeZone\":\"America/New_York\",\"content\":\"\",\"id\":\"6a1990c4192b3547f10e85c0\"}],\"delete\":[],\"addAttachments\":[],\"updateAttachments\":[],\"deleteAttachments\":[]}"
+  },
+  {
+    "ts": 1780061128826,
+    "url": "https://api.ticktick.com/api/v2/batch/task",
+    "method": "POST",
+    "body": "{\"add\":[],\"update\":[{\"items\":[],\"reminders\":[{\"id\":\"6a1993b0192b3547f10e8614\",\"trigger\":\"TRIGGER:-PT15M\"},{\"id\":\"6a199134192b3547f10e85e3\",\"trigger\":\"TRIGGER:-PT20M\"},{\"id\":\"6a199101192b3547f10e85d9\",\"trigger\":\"TRIGGER:-PT1440M\"}],\"exDate\":[],\"dueDate\":null,\"repeatFirstDate\":\"2026-06-05T16:00:00.000+0000\",\"priority\":0,\"isAllDay\":false,\"repeatFlag\":null,\"progress\":0,\"assignee\":null,\"sortOrder\":-1099511627776,\"startDate\":\"2026-06-05T16:00:00.000+0000\",\"isFloating\":false,\"reminder\":null,\"remindTime\":null,\"status\":0,\"projectId\":\"6a1990b68f08cb3a4c929be5\",\"kind\":null,\"etag\":\"vijvkxxs\",\"createdTime\":\"2026-05-29T13:12:36.000+0000\",\"modifiedTime\":\"2026-05-29T13:25:28.000+0000\",\"title\":\"single time based reminder\",\"tags\":[],\"timeZone\":\"America/New_York\",\"content\":\"\",\"id\":\"6a1990c4192b3547f10e85c0\"}],\"delete\":[],\"addAttachments\":[],\"updateAttachments\":[],\"deleteAttachments\":[]}"
+  }
+]

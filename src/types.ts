@@ -53,13 +53,11 @@ export type TickTickTask = {
    * surfaces this alongside the full {@link TickTickTask.reminders} array;
    * empty string when no reminder is set. Decode with `parseReminderTrigger`.
    *
-   * **Read-only via this SDK** — see {@link TickTickTask.reminders} for the
-   * full caveat. Setting this field on `TickTickTaskDraft` / `TickTickTaskUpdate`
-   * is NOT supported yet; the write payload is silently dropped by the
-   * server (200 OK + empty field on readback). Pending HAR capture
-   * against the official TickTick web client — see fork issues
-   * [#2](https://github.com/MHoroszowski/ticktick-client/issues/2) and
-   * [#3](https://github.com/MHoroszowski/ticktick-client/issues/3).
+   * Read-only on `TickTickTask` — the field is populated by the server
+   * from {@link TickTickTask.reminders} on readback. To set reminders
+   * use {@link TickTickTaskDraft.reminder} on create, or
+   * `tasks.setReminders(projectId, taskId, reminders)` on an existing
+   * task.
    */
   readonly reminder?: string;
   /**
@@ -73,25 +71,14 @@ export type TickTickTask = {
    * ]
    * ```
    *
-   * **Read-only via this SDK as of this release.** Reminders set through
-   * the official TickTick clients (web, mobile, desktop) surface here
-   * correctly, but **setting them programmatically requires the V2 wire
-   * format**, which is pending an HAR capture against the official
-   * client — empirical probing (see `scripts/reminders-probe.ts` and
-   * `scripts/reminders-probe-2.ts`) confirmed that `POST /api/v2/task/{id}`
-   * accepts every shape we tried with 200 OK *but silently drops the
-   * field on readback*. See fork issues
-   * [#2](https://github.com/MHoroszowski/ticktick-client/issues/2)
-   * (single time reminder) and
-   * [#3](https://github.com/MHoroszowski/ticktick-client/issues/3)
-   * (multi-reminder array) for the reproduction and the open HAR-capture
-   * task that will close the write path.
+   * Decode each trigger string with `parseReminderTrigger`; compose new
+   * triggers with `formatReminderTrigger`.
    *
-   * Decode each trigger string into a structured form with
-   * `parseReminderTrigger`; compose new triggers with
-   * `formatReminderTrigger` (helpers ship today and will become useful
-   * once the write path lands — see fork issue
-   * [#4](https://github.com/MHoroszowski/ticktick-client/issues/4)).
+   * To set reminders use `tasks.setReminders(projectId, taskId, [...])`
+   * or pass `reminders` / `reminder` on `TickTickTaskDraft` /
+   * `TickTickTaskUpdate`. Writes go through the V2 batch sync endpoint
+   * (`POST /api/v2/batch/task`) with read-modify-merge-write — the
+   * partial-update endpoint silently drops the field.
    */
   readonly reminders?: readonly TickTickReminder[];
 };
@@ -133,6 +120,44 @@ export type TickTickTaskDraft = {
    * to explicitly leave unassigned.
    */
   readonly assignee?: number | null;
+  /**
+   * Single time-based reminder as an RFC 5545 TRIGGER string
+   * (e.g. `"TRIGGER:-PT15M"` for 15 minutes before due). Ergonomic
+   * sugar for `reminders: [reminder]`. The library generates the
+   * server-stable `id` internally.
+   *
+   * **`reminders` wins on conflict.** If both are set, `reminders` is
+   * used and `reminder` is silently dropped.
+   *
+   * Compose triggers with `formatReminderTrigger`, e.g.
+   * `formatReminderTrigger({ before: '15m' })`. Pass `null` to clear
+   * all reminders on the task.
+   *
+   * Writes route through `POST /api/v2/batch/task` (the V2 batch sync
+   * endpoint the official TickTick clients use); the partial-update
+   * endpoint silently drops reminder fields. See
+   * `Plans/reminders-har-capture-raw.json` for the wire shape.
+   */
+  readonly reminder?: string | null;
+  /**
+   * Multiple reminders on a task. Accepts either RFC 5545 TRIGGER
+   * strings (the library generates the server-stable `id` per entry) or
+   * full `{id, trigger}` objects (use this to preserve existing ids on
+   * round-trips — e.g. when echoing back what `tasks.list()` returned).
+   *
+   * Partial-update semantics: omit to preserve the current reminders,
+   * pass an array (incl. `[]`) to set, pass `null` to clear all.
+   * Premium TickTick supports multiple reminders per task; the server
+   * may return 402/403 for non-Premium accounts that attempt > 1 —
+   * the library surfaces that error.
+   *
+   * Writes use the V2 batch sync endpoint (`POST /api/v2/batch/task`)
+   * with read-modify-merge-write semantics; the library fetches the
+   * task fresh before writing to obtain the current etag (optimistic
+   * concurrency). For explicit set-only-reminders use
+   * `tasks.setReminders(projectId, taskId, reminders)`.
+   */
+  readonly reminders?: readonly (string | TickTickReminder)[] | null;
 };
 
 export type TickTickTaskMove = {

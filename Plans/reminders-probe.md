@@ -1,3 +1,5 @@
+> **RESOLVED 2026-05-29:** HAR capture against the official web client revealed the endpoint: `POST /api/v2/batch/task` (V2 batch sync envelope) with full read-modify-write + etag. See `Plans/reminders-har-capture-raw.json` for the capture and `ISA.md` Changelog for the full write-up. Write-path landed in commit on 2026-05-29; #2 and #3 closed. Document below kept as historical record of the wrong-endpoint probes.
+
 # Reminders write-path probe — V2 endpoint refuses every shape
 
 Date: 2026-05-28

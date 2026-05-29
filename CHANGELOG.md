@@ -9,20 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Reminder semantic helpers + readback typing (epic #59 — sub-issues #2, #3, #4 partial).**
-  RFC 5545 §3.8.6.3 `TRIGGER` parse + format helpers shipped (#4 closed);
-  read-only readback typing for the V2 reminder surface on `TickTickTask`
-  (#2/#3 readback half). Write path on `POST /api/v2/task/{id}` is silently
-  dropped by the server (200 OK + empty field on readback) across every
-  shape probed — string array, object form with `{id, trigger}`, scalar
-  field, combined, multi-array, and explicit clears (see
-  `scripts/reminders-probe.ts` + `scripts/reminders-probe-2.ts`). Fork
-  issues [#2](https://github.com/MHoroszowski/ticktick-client/issues/2)
-  and [#3](https://github.com/MHoroszowski/ticktick-client/issues/3)
-  re-labeled `needs: har-capture`, matching the existing label on
-  sub-issue [#5](https://github.com/MHoroszowski/ticktick-client/issues/5)
-  (geofence). Epic [#59](https://github.com/MHoroszowski/ticktick-client/issues/59)
-  stays open pending HAR capture against the official client.
+- **Reminder write-path (epic #59 — sub-issues #2 + #3 closed).** HAR
+  capture against the official TickTick web client revealed the V2 wire
+  shape — reminders ride through `POST /api/v2/batch/task` (the V2 batch
+  sync envelope) with full read-modify-merge-write semantics, not the
+  partial-update endpoint. See `Plans/reminders-har-capture-raw.json`
+  for the wire reference.
+  - New `tasks.setReminders(projectId, taskId, reminders | null)`
+    replaces the full reminders array on a task; pass `null` to clear.
+    Accepts string triggers (library generates the server-stable `id`)
+    or full `{id, trigger}` objects (preserves ids on round-trips).
+  - `tasks.create({..., reminder | reminders})` now ships reminders on
+    create. Single sugar field `reminder?: string | null` collapses to
+    a one-element array internally; `reminders?: readonly (string |
+    TickTickReminder)[] | null` accepts the canonical form. Implementation
+    is two HTTP calls under the hood (plain create → setReminders) to
+    match the official client.
+  - `tasks.update({..., reminder | reminders})` re-routes the entire
+    partial update through the batch endpoint when reminder fields are
+    in the payload, so title + reminders can land in one caller-facing
+    call. Non-reminder updates stay on the existing partial-update path.
+  - **`reminders` wins on conflict.** If both `reminder` and `reminders`
+    are set, the array form is used and the scalar is silently dropped.
+  - Wire detail: scalar `reminder` is always sent as `null` on the wire
+    (matches the official client; the server populates the scalar from
+    the array). Etag carried from a fresh `tasks.list()` read for
+    optimistic concurrency.
+
+  Sub-issue [#5](https://github.com/MHoroszowski/ticktick-client/issues/5)
+  (location/geofence reminders) is mobile-only — TickTick's web UI
+  doesn't expose them — and is spun out as a separate iOS HAR-capture
+  cycle. Epic [#59](https://github.com/MHoroszowski/ticktick-client/issues/59)
+  stays open until that lands.
+
+- **Reminder semantic helpers + readback typing (epic #59 — sub-issue #4).**
+  RFC 5545 §3.8.6.3 `TRIGGER` parse + format helpers shipped (#4 closed)
+  in the prior cycle; readback typing on `TickTickTask` carries
+  `reminder?: string` + `reminders?: readonly TickTickReminder[]`.
+  This release's write-path makes the helpers useful end-to-end —
+  compose triggers with `formatReminderTrigger({ before: '15m' })` and
+  attach via `tasks.setReminders`.
   - `parseReminderTrigger(trigger: string)` → `{ at: 'due' } | { before: ReminderDuration } | { after: ReminderDuration } | undefined`. Drops zero-valued fields on parse (e.g. `"TRIGGER:-P0DT9H0M0S"` → `{ before: { hours: 9 } }`).
   - `formatReminderTrigger(input)` → RFC 5545 string. Accepts both
     structured `{ minutes: 15 }` and shorthand `'15m'` / `'1d 9h'`

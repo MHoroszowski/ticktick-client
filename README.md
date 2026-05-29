@@ -34,8 +34,9 @@ The table below maps every major TickTick capability to its support status in th
 | | Restore from trash | :warning: | `tasks.restore()` &mdash; works if you know the task ID |
 | | Recurring tasks | :white_check_mark: | via `repeatFlag` / `repeatEndDate` in create/update |
 | | Reminders &mdash; read | :white_check_mark: | `task.reminder` / `task.reminders` on readback; `parseReminderTrigger()` helper |
-| | Reminders &mdash; write (time-based) | :warning: | helpers ship (`formatReminderTrigger`), write-path pending HAR &mdash; see [#2](https://github.com/MHoroszowski/ticktick-client/issues/2) / [#3](https://github.com/MHoroszowski/ticktick-client/issues/3) |
-| | Reminders &mdash; write (geofence) | :x: | Pending HAR capture &mdash; see [#5](https://github.com/MHoroszowski/ticktick-client/issues/5) |
+| | Reminders &mdash; write (time-based, single) | :white_check_mark: | `tasks.create({reminder})` / `tasks.setReminders()` / `tasks.update({reminder})` &mdash; routes through V2 batch sync endpoint |
+| | Reminders &mdash; write (time-based, multi) | :white_check_mark: | `tasks.create({reminders})` / `tasks.setReminders()` / `tasks.update({reminders})` &mdash; Premium-gated server-side |
+| | Reminders &mdash; write (geofence/location) | :x: | Mobile-only on TickTick &mdash; needs iOS HAR session, see [#5](https://github.com/MHoroszowski/ticktick-client/issues/5) |
 | | Attachments | :x: | Not implemented |
 | | Comments | :x: | Not implemented |
 | | Sort order | :white_check_mark: | via `sortOrder` in create/update |
@@ -203,6 +204,62 @@ await client.tasks.deleteMany([
   { taskId: 'id2', projectId },
 ]);
 ```
+
+#### Reminders
+
+Reminders use the V2 batch sync endpoint (`POST /api/v2/batch/task`) with full read-modify-write semantics &mdash; the partial-update endpoint silently drops reminder fields. The library handles the routing transparently; you just pass `reminder` or `reminders` and it Does The Right Thing.
+
+```typescript
+import { formatReminderTrigger } from 'ticktick-client';
+
+// Create with a single reminder (sugar — collapses to reminders: [trigger] internally)
+const task = await client.tasks.create({
+  title: 'Doctor',
+  projectId,
+  dueDate: '2026-06-01T15:00:00.000+0000',
+  isAllDay: false,
+  reminder: formatReminderTrigger({ before: '15m' }),  // 'TRIGGER:-PT15M'
+});
+
+// Create with multiple reminders (Premium feature server-side)
+await client.tasks.create({
+  title: 'Project deadline',
+  projectId,
+  dueDate: '2026-06-01T15:00:00.000+0000',
+  isAllDay: false,
+  reminders: [
+    formatReminderTrigger({ before: { days: 1 } }),    // 'TRIGGER:-P1D'
+    formatReminderTrigger({ before: { hours: 1 } }),   // 'TRIGGER:-PT1H'
+    formatReminderTrigger({ at: 'due' }),              // 'TRIGGER:PT0S'
+  ],
+});
+
+// Replace reminders on an existing task (dedicated method)
+await client.tasks.setReminders(projectId, task.id, ['TRIGGER:-PT30M']);
+
+// Combined: rename + change reminders in one call
+await client.tasks.update({
+  id: task.id,
+  projectId,
+  title: 'Doctor — moved earlier',
+  reminders: ['TRIGGER:-PT1H'],
+});
+
+// Clear all reminders
+await client.tasks.setReminders(projectId, task.id, null);
+
+// Round-trip: read back what's on the task
+const refreshed = (await client.tasks.list()).find((t) => t.id === task.id);
+for (const rem of refreshed?.reminders ?? []) {
+  console.log(rem.id, rem.trigger);
+}
+```
+
+**Notes:**
+
+- `reminders` wins on conflict — if both `reminder` (sugar) and `reminders` (array) are set, the array is authoritative.
+- The `id` field on each reminder is server-stable across edits. Pass `TickTickReminder` objects on round-trips to preserve ids; pass plain strings to let the library generate them.
+- Location/geofence reminders are mobile-only on TickTick and not yet supported — see [#5](https://github.com/MHoroszowski/ticktick-client/issues/5).
 
 #### Moving Tasks Between Projects
 
@@ -616,7 +673,7 @@ for (const t of tasks) {
 }
 ```
 
-**Note:** The V2 wire format for *setting* reminders is pending HAR capture &mdash; see [#2](https://github.com/MHoroszowski/ticktick-client/issues/2) and [#3](https://github.com/MHoroszowski/ticktick-client/issues/3). The helpers above produce RFC 5545 strings that callers can use directly once that lands.
+Compose a trigger and attach it to a task via `tasks.create`, `tasks.update`, or `tasks.setReminders` &mdash; see [Reminders](#reminders) under the Tasks API for the full write path.
 
 ---
 

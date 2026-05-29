@@ -890,30 +890,22 @@ async function testActivity() {
   }
 }
 
-// ───────── Reminders (epic #59 — read-only via SDK pending HAR for write) ─────────
+// ───────── Reminders (epic #59 — full write+read round-trip) ─────────
 
 /**
- * Reminders surface in the SDK is read-only as of this release. The V2
- * write path silently drops reminder fields on POST /api/v2/task/{id}
- * (200 OK + empty `reminder`/`reminders` on readback). Reproduced
- * empirically — see `scripts/reminders-probe.ts` and
- * `scripts/reminders-probe-2.ts` — and matches the same pattern as
- * sub-issue #5 (geofence): wire shape needs HAR capture from the
- * official client. See fork issues #2, #3 (write-path pending) and #4
- * (helpers shipped).
- *
- * This test asserts (a) the readback type carries reminder + reminders
- * with `{id, trigger}` entries when the live account has them, (b)
- * `parseReminderTrigger` decodes server-stored trigger strings without
- * loss, and (c) the helpers are wired through the public package surface.
+ * Exercises the full reminders subsystem against the live test account:
+ * read survey + helper round-trip (kept from the prior cycle), plus
+ * the write path now that the V2 batch sync wire shape is captured.
+ * See `Plans/reminders-har-capture-raw.json` for the wire-shape
+ * reference; `tasks.setReminders`, `tasks.update({reminders})`, and
+ * `tasks.create({reminders})` are exercised here.
  */
 async function testReminders() {
-  section('Reminders (epic #59 — readback + helper round-trip)');
+  section('Reminders (epic #59 — write + readback round-trip)');
 
-  // Helpers wired through the package
   const { parseReminderTrigger, formatReminderTrigger } = await import('../src/semantic.js');
 
-  // Sanity: helpers behave on canonical inputs.
+  // ── Helper sanity ─────────────────────────────────────────────────
   try {
     if (formatReminderTrigger({ at: 'due' }) !== 'TRIGGER:PT0S') throw new Error('at-due format');
     if (formatReminderTrigger({ before: { minutes: 15 } }) !== 'TRIGGER:-PT15M')
@@ -921,80 +913,157 @@ async function testReminders() {
     const parsed = parseReminderTrigger('TRIGGER:-P0DT9H0M0S');
     if (JSON.stringify(parsed) !== JSON.stringify({ before: { hours: 9 } }))
       throw new Error(`9h parse mismatch: ${JSON.stringify(parsed)}`);
-    ok('formatReminderTrigger / parseReminderTrigger sanity ok');
+    ok('helpers sanity ok');
   } catch (e) {
     fail('helper sanity check', e);
   }
 
-  // Survey live tasks for any pre-existing reminders (set via official client).
-  let surveyedCount = 0;
-  let withReminders: readonly TickTickTaskWithReminders[] = [];
+  const projectId = await getInboxProjectId();
+  const probeIds: string[] = [];
+
+  // ── Write 1: create with single `reminder` sugar (sub-issue #2) ───
   try {
+    const t = await client.tasks.create({
+      title: `${TEST_PREFIX} reminder single`,
+      projectId,
+      dueDate: '2027-06-01T15:00:00.000+0000',
+      isAllDay: false,
+      reminder: 'TRIGGER:-PT15M',
+    });
+    probeIds.push(t.id);
     const all = await client.tasks.list();
-    surveyedCount = all.length;
-    withReminders = all.filter(
-      (t): t is TickTickTaskWithReminders =>
-        Array.isArray((t as TickTickTaskWithReminders).reminders) &&
-        ((t as TickTickTaskWithReminders).reminders?.length ?? 0) > 0,
-    );
-    ok(`surveyed ${surveyedCount} live tasks → ${withReminders.length} carry reminders`);
+    const fetched = all.find((x) => x.id === t.id);
+    const triggers = (fetched?.reminders ?? []).map((r) => r.trigger);
+    if (triggers.length === 1 && triggers[0] === 'TRIGGER:-PT15M') {
+      ok(`create({reminder}) → ${triggers[0]} round-trips`);
+    } else {
+      throw new Error(`expected ['TRIGGER:-PT15M'], got ${JSON.stringify(triggers)}`);
+    }
   } catch (e) {
-    fail('reminder readback survey', e);
+    fail('create({reminder}) single round-trip', e);
   }
 
-  if (withReminders.length === 0) {
-    skip(
-      'reminder readback round-trip',
-      'no live task carries reminders — set one via the official client to exercise this path',
-    );
-  } else {
-    // Pick the first reminder on the first reminded task.
-    const sample = withReminders[0]!;
-    const first = sample.reminders![0]!;
-    try {
-      if (typeof first.id !== 'string' || typeof first.trigger !== 'string') {
-        throw new Error(
-          `expected reminder { id: string, trigger: string }, got ${JSON.stringify(first)}`,
-        );
-      }
-      ok(`reminder readback shape — id=${first.id}, trigger=${first.trigger}`);
-    } catch (e) {
-      fail('reminder readback shape', e);
+  // ── Write 2: create with multi `reminders` array (sub-issue #3) ───
+  try {
+    const t = await client.tasks.create({
+      title: `${TEST_PREFIX} reminder multi`,
+      projectId,
+      dueDate: '2027-06-01T15:00:00.000+0000',
+      isAllDay: false,
+      reminders: ['TRIGGER:-PT24H', 'TRIGGER:-PT1H', 'TRIGGER:PT0S'],
+    });
+    probeIds.push(t.id);
+    const all = await client.tasks.list();
+    const fetched = all.find((x) => x.id === t.id);
+    const triggers = [...(fetched?.reminders ?? []).map((r) => r.trigger)].sort();
+    const expected = ['TRIGGER:-PT1H', 'TRIGGER:-PT24H', 'TRIGGER:PT0S'].sort();
+    if (JSON.stringify(triggers) === JSON.stringify(expected)) {
+      ok(`create({reminders}) → all 3 round-trip`);
+    } else {
+      throw new Error(`expected ${JSON.stringify(expected)}, got ${JSON.stringify(triggers)}`);
     }
+  } catch (e) {
+    fail('create({reminders}) multi round-trip', e);
+  }
 
-    // Round-trip: parse the server's trigger, format it back, compare bytes.
+  // ── Write 3: setReminders replaces the array ───────────────────────
+  try {
+    const t = await client.tasks.create({
+      title: `${TEST_PREFIX} reminder replace`,
+      projectId,
+      dueDate: '2027-06-01T15:00:00.000+0000',
+      isAllDay: false,
+    });
+    probeIds.push(t.id);
+
+    await client.tasks.setReminders(projectId, t.id, ['TRIGGER:-PT15M', 'TRIGGER:PT0S']);
+    let all = await client.tasks.list();
+    let fetched = all.find((x) => x.id === t.id);
+    let triggers = [...(fetched?.reminders ?? []).map((r) => r.trigger)].sort();
+    if (JSON.stringify(triggers) !== JSON.stringify(['TRIGGER:-PT15M', 'TRIGGER:PT0S'])) {
+      throw new Error(`after set: expected 2 reminders, got ${JSON.stringify(triggers)}`);
+    }
+    ok(`setReminders([2 triggers]) → 2 round-trip`);
+
+    // Replace with a different single reminder (proves replacement, not append)
+    await client.tasks.setReminders(projectId, t.id, ['TRIGGER:-PT30M']);
+    all = await client.tasks.list();
+    fetched = all.find((x) => x.id === t.id);
+    triggers = (fetched?.reminders ?? []).map((r) => r.trigger);
+    if (triggers.length === 1 && triggers[0] === 'TRIGGER:-PT30M') {
+      ok(`setReminders([1 trigger]) replaces existing array`);
+    } else {
+      throw new Error(`after replace: expected ['TRIGGER:-PT30M'], got ${JSON.stringify(triggers)}`);
+    }
+  } catch (e) {
+    fail('setReminders replace round-trip', e);
+  }
+
+  // ── Write 4: update combines title + reminders in one call ─────────
+  try {
+    const t = await client.tasks.create({
+      title: `${TEST_PREFIX} reminder combined`,
+      projectId,
+      dueDate: '2027-06-01T15:00:00.000+0000',
+      isAllDay: false,
+    });
+    probeIds.push(t.id);
+
+    await client.tasks.update({
+      id: t.id,
+      projectId,
+      title: `${TEST_PREFIX} reminder combined — renamed`,
+      reminders: ['TRIGGER:-PT45M'],
+    });
+    const all = await client.tasks.list();
+    const fetched = all.find((x) => x.id === t.id);
+    const titleOk = fetched?.title === `${TEST_PREFIX} reminder combined — renamed`;
+    const triggers = (fetched?.reminders ?? []).map((r) => r.trigger);
+    const remindersOk = triggers.length === 1 && triggers[0] === 'TRIGGER:-PT45M';
+    if (titleOk && remindersOk) {
+      ok(`update({title, reminders}) — both fields land in one call`);
+    } else {
+      throw new Error(
+        `combined update mismatch — title=${fetched?.title}, reminders=${JSON.stringify(triggers)}`,
+      );
+    }
+  } catch (e) {
+    fail('update({title, reminders}) combined', e);
+  }
+
+  // ── Write 5: setReminders(..., null) clears ────────────────────────
+  try {
+    const t = await client.tasks.create({
+      title: `${TEST_PREFIX} reminder clear`,
+      projectId,
+      dueDate: '2027-06-01T15:00:00.000+0000',
+      isAllDay: false,
+      reminders: ['TRIGGER:-PT15M', 'TRIGGER:PT0S'],
+    });
+    probeIds.push(t.id);
+
+    await client.tasks.setReminders(projectId, t.id, null);
+    const all = await client.tasks.list();
+    const fetched = all.find((x) => x.id === t.id);
+    const reminders = fetched?.reminders ?? [];
+    if (reminders.length === 0) {
+      ok(`setReminders(..., null) cleared all reminders`);
+    } else {
+      throw new Error(`after clear: expected 0 reminders, got ${reminders.length}`);
+    }
+  } catch (e) {
+    fail('setReminders(null) clear', e);
+  }
+
+  // ── Cleanup ────────────────────────────────────────────────────────
+  for (const id of probeIds) {
     try {
-      const parsed = parseReminderTrigger(first.trigger);
-      if (parsed === undefined) {
-        throw new Error(`parseReminderTrigger returned undefined for ${first.trigger}`);
-      }
-      // Re-encode and assert byte equality on canonical forms; if the
-      // server uses a non-canonical form (e.g. "TRIGGER:-P0DT9H0M0S")
-      // the round-trip canonicalises to "TRIGGER:-PT9H" — that's by
-      // design ("drop zero fields"), so we assert structural rather than
-      // byte equality.
-      const reEncoded = formatReminderTrigger(parsed);
-      const reParsed = reEncoded ? parseReminderTrigger(reEncoded) : undefined;
-      if (JSON.stringify(reParsed) !== JSON.stringify(parsed)) {
-        throw new Error(
-          `parse→format→parse not idempotent: ${JSON.stringify(parsed)} ↛ ${JSON.stringify(reParsed)}`,
-        );
-      }
-      ok(`parse→format→parse idempotent on live trigger: ${first.trigger} → ${JSON.stringify(parsed)}`);
-    } catch (e) {
-      fail('helper round-trip on live trigger', e);
+      await client.tasks.delete(projectId, id);
+    } catch {
+      // already gone is fine
     }
   }
 }
-
-// Structural typing helper for the readback survey — narrows away
-// optional + readonly to keep the iteration ergonomic.
-type TickTickTaskWithReminders = {
-  readonly id: string;
-  readonly title: string;
-  readonly reminders?: readonly { id: string; trigger: string }[];
-  readonly reminder?: string;
-};
 
 // ───────── Main ─────────
 
