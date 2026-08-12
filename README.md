@@ -126,12 +126,14 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 }
 ```
 
-### Available Tools (41)
+### Available Tools (52)
 
 | Module | Tools |
 |--------|-------|
-| **Tasks** | `list_tasks`, `create_task`, `update_task`, `complete_task`, `delete_task`, `move_task`, `create_subtask`, `pin_task`, `unpin_task`, `list_completed_tasks` |
-| **Projects** | `list_projects`, `create_project`, `update_project`, `delete_project`, `list_columns`, `list_project_members` |
+| **Tasks** | `list_tasks`, `create_task`, `update_task`, `complete_task`, `delete_task`, `move_task`, `create_subtask`, `pin_task`, `unpin_task`, `list_completed_tasks`, `set_task_reminders` |
+| **Projects** | `list_projects`, `create_project`, `update_project`, `delete_project`, `list_columns`, `list_project_members`, `create_column`, `update_column`, `delete_column` |
+| **Project groups** | `list_project_groups`, `create_project_group`, `update_project_group`, `delete_project_group`, `delete_project_groups` |
+| **Activity** | `list_task_activity`, `list_project_activity` |
 | **Tags** | `list_tags`, `create_tag`, `update_tag`, `delete_tag`, `merge_tags` |
 | **Habits** | `list_habits`, `create_habit`, `update_habit`, `delete_habit`, `checkin_habit`, `get_habit_week_stats` |
 | **Focus** | `start_focus`, `pause_focus`, `resume_focus`, `finish_focus`, `stop_focus`, `get_focus_overview` |
@@ -149,6 +151,10 @@ Once configured, just talk to Claude naturally:
 - *"Start a 25-minute focus session"*
 - *"How are my habits going this week?"*
 - *"Show my productivity ranking"*
+- *"Remind me 15 minutes before the dentist appointment"*
+- *"Make a Home Reno folder and move the Kitchen and Bathroom lists into it"*
+- *"Add a Blocked column to the Sprint board"*
+- *"Who changed this task and when?"* (Premium)
 
 ### Environment Variables
 
@@ -787,7 +793,8 @@ ticktick-client/
       config.ts        # Environment variable loading
       client-factory.ts # Config → TickTickClient instance
       error-handler.ts # Error mapping + stripUndefined utility
-      tools/           # 41 MCP tool definitions (one file per module)
+      reminder-input.ts # Agent-friendly reminder shape → RFC 5545 TRIGGER
+      tools/           # 52 MCP tool definitions (one file per module)
     types.ts           # All TypeScript type definitions
     errors.ts          # TickTickError, TickTickAuthError, TickTickApiError
     semantic.ts        # Human-readable label converters

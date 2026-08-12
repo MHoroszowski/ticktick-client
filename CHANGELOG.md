@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **MCP parity with the fork's modules.** The merged-in MCP server (see
+  0.4.0) was built against upstream's module surface and did not expose
+  anything this fork added after the fork point. All 11 missing methods
+  are now wired up, taking the tool count from 41 to 52.
+  - `list_project_groups`, `create_project_group`, `update_project_group`,
+    `delete_project_group`, `delete_project_groups` — new
+    `src/mcp/tools/project-groups.ts`.
+  - `list_task_activity`, `list_project_activity` — new
+    `src/mcp/tools/activity.ts`. Both carry the Premium-only caveat and
+    the `{skip, lastId}` pagination contract in their descriptions.
+  - `create_column`, `update_column`, `delete_column` — added to the
+    projects registry. Descriptions carry the two empirical gotchas: the
+    project must be in kanban view, and `update_column` requires
+    `projectId` or the server silently no-ops.
+  - `set_task_reminders`, plus a `reminders` field on `create_task` and
+    `update_task`.
+  - `create_project` / `update_project` now accept `groupId`, so an agent
+    can actually file a project into a folder it just created.
+
+- **Agent-facing reminder shape** (`src/mcp/reminder-input.ts`). MCP
+  callers pass `{"at":"due"}`, `{"before":"15m"}`, `{"after":"1h"}`, or
+  `{"trigger":"TRIGGER:-PT15M"}` as an escape hatch; the layer converts
+  via `formatReminderTrigger`. Raw RFC 5545 is precise but hostile to
+  compose from a prompt, and a malformed duration now returns a
+  correctable error naming the offending index rather than silently
+  dropping the reminder.
+
+### Fixed
+
+- **`update_project` required `name`.** The 0.3.0 partial-update
+  unification made it optional on `projects.update`, but the MCP schema
+  still demanded it, forcing callers to re-supply the name to change a
+  color. Now optional, matching the client contract.
+- **Explicit `null` was unreachable through MCP.** Every schema field was
+  `.optional()` and never `.nullable()`, so the "pass null to clear" half
+  of the partial-update contract could not be expressed at all — no
+  clearing a `dueDate`, `columnId`, `assignee`, tag `parent`, or project
+  `groupId`. The fields the client types declare as `T | null` are now
+  `.nullable()`. The omit-to-preserve half was already correct via
+  `stripUndefined`.
+- Dropped a stale `as typeof cleaned & { title: string }` cast in
+  `update_task`, left over from the pre-0.3.0 signature when `title` was
+  required.
+
+### Tests
+
+- `tests/mcp/tools.test.ts` asserts the exact 52-tool roster, that every
+  non-identifier field on an update tool is omittable, and that every
+  clearable field accepts `null` — the drift this release fixes is
+  exactly what these guard against.
+- `tests/mcp/reminder-input.test.ts` covers the trigger conversion and
+  its error paths.
+
 ## [0.4.0] - 2026-08-11
 
 Merges `upstream/main` (jaeyeonling/ticktick-client) at `b579e3f` into the

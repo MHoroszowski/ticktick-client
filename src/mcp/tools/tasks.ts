@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { TickTickClient } from '../../client.js';
 import { mapError, jsonResult, stripUndefined } from '../error-handler.js';
+import { reminderInputSchema, toTriggerStrings } from '../reminder-input.js';
 
 export function registerTaskTools(server: McpServer, client: TickTickClient): void {
   server.tool(
@@ -46,12 +47,21 @@ export function registerTaskTools(server: McpServer, client: TickTickClient): vo
       content: z.string().optional().describe('Task description (supports Markdown).'),
       tags: z.array(z.string()).optional().describe('Tag names to attach.'),
       repeatFlag: z.string().optional().describe('Recurrence rule string.'),
-      columnId: z.string().optional().describe('Kanban column ID. Get valid values via list_projects.'),
+      columnId: z.string().optional().describe('Kanban column ID. Get valid values via list_columns.'),
       assignee: z.number().optional().describe('Assignee user ID for shared projects. Get valid values via list_project_members.'),
+      reminders: z.array(reminderInputSchema).optional()
+        .describe('Reminders to attach, e.g. [{"before":"15m"}] or [{"at":"due"}]. Requires a dueDate to be meaningful. Multiple reminders need TickTick Premium.'),
     },
-    async (args) => {
+    async ({ reminders, ...rest }) => {
       try {
-        return jsonResult(await client.tasks.create(stripUndefined(args)));
+        const draft = stripUndefined(rest);
+        return jsonResult(
+          await client.tasks.create(
+            reminders === undefined
+              ? draft
+              : { ...draft, reminders: toTriggerStrings(reminders) },
+          ),
+        );
       } catch (error) {
         return mapError(error);
       }
@@ -66,19 +76,48 @@ export function registerTaskTools(server: McpServer, client: TickTickClient): vo
       projectId: z.string().describe('Project ID the task belongs to.'),
       title: z.string().optional().describe('Updated task title. Omit to keep the current title.'),
       priority: z.union([z.literal(0), z.literal(1), z.literal(3), z.literal(5)]).optional().describe('Priority: 0=none, 1=low, 3=medium, 5=high.'),
-      startDate: z.string().optional().describe('Start date in ISO 8601 format.'),
-      dueDate: z.string().optional().describe('Due date in ISO 8601 format.'),
+      startDate: z.string().nullable().optional().describe('Start date in ISO 8601 format. Pass null to clear it.'),
+      dueDate: z.string().nullable().optional().describe('Due date in ISO 8601 format. Pass null to clear it.'),
       isAllDay: z.boolean().optional().describe('Whether this is an all-day task.'),
       content: z.string().optional().describe('Task description (supports Markdown).'),
-      tags: z.array(z.string()).optional().describe('Tag names to attach.'),
-      repeatFlag: z.string().optional().describe('Recurrence rule string.'),
-      columnId: z.string().optional().describe('Kanban column ID.'),
-      assignee: z.number().optional().describe('Assignee user ID for shared projects.'),
+      tags: z.array(z.string()).optional().describe('Tag names to attach. Replaces the current set.'),
+      repeatFlag: z.string().nullable().optional().describe('Recurrence rule string. Pass null to stop the task repeating.'),
+      repeatEndDate: z.string().nullable().optional().describe('Date the recurrence stops, ISO 8601. Pass null to clear it.'),
+      columnId: z.string().nullable().optional().describe('Kanban column ID — see list_columns. Pass null to remove it from its column.'),
+      assignee: z.number().nullable().optional().describe('Assignee user ID for shared projects. Pass null to unassign.'),
+      reminders: z.array(reminderInputSchema).nullable().optional()
+        .describe('Replaces every reminder on the task, e.g. [{"before":"15m"}]. Pass null to clear them all. Omit to leave them untouched.'),
     },
-    async (args) => {
+    async ({ reminders, ...rest }) => {
       try {
-        const cleaned = stripUndefined(args);
-        return jsonResult(await client.tasks.update(cleaned as typeof cleaned & { title: string }));
+        const update = stripUndefined(rest);
+        return jsonResult(
+          await client.tasks.update(
+            reminders === undefined
+              ? update
+              : { ...update, reminders: toTriggerStrings(reminders) },
+          ),
+        );
+      } catch (error) {
+        return mapError(error);
+      }
+    },
+  );
+
+  server.tool(
+    'set_task_reminders',
+    'Replace every reminder on an existing task in one call. Pass null to clear them all. Use this when reminders are the only thing changing; update_task also accepts a reminders field when changing them alongside other fields.',
+    {
+      taskId: z.string().describe('Task ID to set reminders on.'),
+      projectId: z.string().describe('Project ID the task belongs to.'),
+      reminders: z.array(reminderInputSchema).nullable()
+        .describe('The complete reminder set, e.g. [{"at":"due"},{"before":"15m"}]. Pass null or [] to clear. Multiple reminders need TickTick Premium.'),
+    },
+    async ({ taskId, projectId, reminders }) => {
+      try {
+        return jsonResult(
+          await client.tasks.setReminders(projectId, taskId, toTriggerStrings(reminders)),
+        );
       } catch (error) {
         return mapError(error);
       }

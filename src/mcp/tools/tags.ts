@@ -43,7 +43,7 @@ export function registerTagTools(server: McpServer, client: TickTickClient): voi
       name: z.string().describe('Tag name to update (used as identifier).'),
       label: z.string().optional().describe('New display label.'),
       color: z.string().optional().describe('New tag color.'),
-      parent: z.string().optional().describe('New parent tag name.'),
+      parent: z.string().nullable().optional().describe('New parent tag name. Pass null to unnest the tag. Omit to leave it where it is.'),
     },
     async (args) => {
       try {
