@@ -5,9 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-08-11
+
+Merges `upstream/main` (jaeyeonling/ticktick-client) at `b579e3f` into the
+fork. Upstream also published a `0.3.0` — an unrelated release carrying only
+the MCP server below. Because this fork had already released its own `0.3.0`
+(project groups + the partial-update contract), the two lines are reconciled
+here at `0.4.0`; upstream's `v0.3.0` tag is deliberately not adopted.
 
 ### Added
+
+- **MCP server (merged from upstream #37).** New `src/mcp/` entry point
+  exposing the client over the Model Context Protocol, shipped as a
+  `ticktick-mcp` binary (`dist/mcp/index.js`).
+  - Tool wrappers for tasks, projects, tags, habits, focus, countdowns,
+    statistics, and user.
+  - Adds runtime dependencies `@modelcontextprotocol/sdk` and `zod` — the
+    library itself remains dependency-free for non-MCP consumers; both are
+    only reachable through the `ticktick-mcp` entry point.
+  - `tsup` now emits two bundles: the library (ESM + CJS + types) and the
+    MCP binary (ESM, with shebang).
+  - **Fork note:** the upstream tool wrappers predate this fork's modules —
+    they do not yet surface `projectGroups`, `activity`, kanban column CRUD,
+    or reminders. Wiring those in is follow-up work.
 
 - **Reminder write-path (epic #59 — sub-issues #2 + #3 closed).** HAR
   capture against the official TickTick web client revealed the V2 wire
@@ -207,6 +227,20 @@ upstream `TickTick<T>` shape declares them nullable (e.g. task
 runtime helper would forward an explicit `null` for them — clearing
 those fields requires a runtime cast and is not part of the typed
 contract.
+
+## [0.2.2] - 2026-04-13
+
+### Added
+
+- `projects.listMembers(projectId)` — list shared-project members via `/api/v2/project/{id}/users` (#35)
+- `assignee` and `creator` fields on `TickTickTask` for shared-project attribution (#35)
+- `assignee` and `columnId` fields on `TickTickTaskDraft` for task creation (#35)
+- `TickTickProjectMember` type exported from package (#35)
+
+### Fixed
+
+- `projects.listColumns()` now correctly unwraps the `{update: [...]}` envelope the API returns (#35)
+- `projects.listColumns(projectId)` applies client-side filtering since the server ignores the projectId parameter (#35)
 
 ## [0.2.0] - 2026-04-07
 
