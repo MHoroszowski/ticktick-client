@@ -25,7 +25,6 @@
     "dist"
   ],
   "scripts": {
-    "prepare": "tsup",
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
